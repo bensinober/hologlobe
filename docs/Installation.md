@@ -1,22 +1,37 @@
 # Prerequisites.md
 
-libgpiod ssd1306 fastled (or similar)
+On raspberry PI
 
-sudo apt install gpiod libgpiod-dev
+## GPIO
 
-[More info](docs/Prerequisites.md)
+should be activated by default but you need development libraries
 
-## build gpiod.zig module from c
+    sudo apt install gpiod libgpiod-dev cmake vim
 
-    g++ -Wall -Wextra -Werror test.c -lgpiod
-    zig cc test.c -lgpiod
-    zig translate-c test.c -lgpiod > gpiod.zig
+## SSD1305 (Display)
 
-## build ws281x.zig Raspberry pi ws281x library to zig
+ssd1306 fastled (or similar)
 
+    sudo vim.tiny /boot/firmware/config.txt
+
+dtparam=spi=on
+
+
+## WS281x library
+
+    sudo apt install git build-essential
     git clone https://github.com/jgarff/rpi_ws281x.git
+    cd rpi_ws281x
     cmake -B build .
-    zig  translate-c -lc -Ibuild ws2811.c > ws2811.zig
+    cd build
+    make
+    sudo make install
+
+## Disable hd audio for timing accuracy
+
+    sudo vim.tiny /boot/firmware/config.txt
+
+dtparam=audio=off
 
 ## libgpiod access for user
 
@@ -30,6 +45,49 @@ sudo apt install gpiod libgpiod-dev
     echo 'KERNEL=="spidev*", GROUP="dialout", MODE="0660"' | sudo tee /etc/udev/rules.d/60-spidev.rules
     sudo udevadm control --reload-rules
     sudo udevadm trigger --verbose
+
+## systemd service
+
+```
+cat <<'EOF' > hologlobe.service
+#hologlobe.service
+# sudo ln -s /home/pi/hologlobe.service /etc/systemd/system/hologlobe.service
+# systemctl daemon-reload
+# systemctl enable hologlobe.service
+
+[Unit]
+Description=Start hologlobe app
+
+[Service]
+WorkingDirectory=/home/pi
+User=root
+Group=root
+Restart=always
+ExecStart=/home/pi/hologlobe-aarch64
+#Environment=DISPLAY=:0
+#Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable hologlobe.service
+
+## For development of libraries
+
+### build gpiod.zig module from c
+
+    g++ -Wall -Wextra -Werror test.c -lgpiod
+    zig cc test.c -lgpiod
+    zig translate-c test.c -lgpiod > gpiod.zig
+
+## build ws281x.zig Raspberry pi ws281x library to zig
+
+    git clone https://github.com/jgarff/rpi_ws281x.git
+    cmake -B build .
+    zig  translate-c -lc -Ibuild ws2811.c > ws2811.zig
 
 ## RPI3 pinout
 ## Timing (Manual)

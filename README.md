@@ -27,6 +27,12 @@ Image upload system is in progress...
 
 Yes, it may actually burn up. That's why it needs to be contained.
 
+## I want to try!
+
+clone this repo and continue to [Installation](docs/Installation.md)
+and  [Documentation](docs/Documentation.md)
+
+
 ## Other noteworthy projects
 
 Coming to the skaperfestival 25
