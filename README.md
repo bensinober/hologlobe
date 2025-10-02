@@ -2,7 +2,7 @@
 
 An insanely impractical 3D hologram rotating sphere POV (persistence of vision)
 
-![pov 1](images/pov-globe-1.png)
+![pov 1](images/hologlobe.png)
 ![pov 2](images/pov-globe-2.png)
 
 ## What does it do?
@@ -39,6 +39,7 @@ Coming to the skaperfestival 25
 
 *Deichman LED wall* : programmable 2x3 meters led wall made by cups and leds
 
+![rainbow ledwall wall](images/ledwall-rainbow.jpg)
 ![deichman led wall](images/deichmanLedWall.png)
 
 *Hoverglobe* : floating illuminated sphere using magnets and leds
