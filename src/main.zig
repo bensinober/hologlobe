@@ -28,7 +28,7 @@ const HALL_PIN = 23; // TODO: add hall sensor
 const LEDSTRIP_COLS = 50; // img width
 const LEDSTRIP_ROWS = 100; //img height
 const LEDSTRIP_PIN_A = 18; // GPIO18 (12)
-const LEDSTRIP_PIN_B = 13; // GPIO13(33)
+const LEDSTRIP_PIN_B = 13; // GPIO13 (33)
 //const LEDSTRIP_PIN = 28; // =18 = GPIO4_D4 = pin 3*8+4 = 28
 
 const BTN_A_PIN = 17; // pin 13 -> GPIO17

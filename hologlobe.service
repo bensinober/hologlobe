@@ -1,5 +1,7 @@
 #hologlobe.service
 # sudo ln -s /home/pi/hologlobe.service /etc/systemd/system/hologlobe.service
+# sudo systemctl daemon-reload
+# sudo systemctl enable hologlobe.service
 [Unit]
 Description=Start hologlobe app
 
@@ -8,7 +10,7 @@ WorkingDirectory=/home/pi
 User=root
 Group=root
 Restart=always
-ExecStart=/home/pi/hologlobe-armv7
+ExecStart=/home/pi/hologlobe-aarch64
 #Environment=DISPLAY=:0
 #Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
 
