@@ -6,7 +6,18 @@
     <title>Three.js PLY Loader</title>
     <style>
         body { margin: 0 overflow: hidden }
-        canvas { display: block }
+        .container {
+            display: flex; /* Makes the container a flex container */
+            justify-content: space-between; /* Distributes items with space between them */
+            align-items: center; /* Vertically centers items within the container */
+            height: 100vh; /* Example: Occupy full viewport height */
+            border: 1px solid #ccc; /* For visualization */
+        }
+        .controls {
+          display: flex; /* Makes the button group a flex container */
+          flex-direction: column; /* Stacks buttons vertically */
+          gap: 10px; /* Adds space between buttons */
+        }
     </style>
     <script type="importmap">
         {
@@ -17,71 +28,29 @@
     </script>
 </head>
 <body>
-    <canvas id="meshCanvas"  style="border:1px solid #000000;"></canvas>
-    <canvas id="outCanvas" width="1080" height="540" style="border:1px solid #000000;"></canvas>
-    <button id="downloadBtn" disabled>gog</button>
+    <div class="container">
+        <div>
+            <canvas id="outCanvas" width="1080" height="540" style="border:1px solid #000000;"></canvas>
+        </div>
+        <div class="controls">
+            <ul>
+                <li><input type="file" id="fileUpload" accept=".ply, text/plain" /></li>
+                <li><button id="startBtn">kjør!</button></li>
+                <li><button id="clearBtn">tøm</button></li>
+                <li><button id="downloadBtn" disabled>Last ned PNG</button></li>
+            </ul>
+        </div>
+    </div>
+    <canvas id="meshCanvas" width="1080" height="540" style="border:1px solid #000000;"></canvas>
     <script type="module">
-// mkdir -p js/examples/jsm/{loaders,controls,utils}
-//import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.166.0/build/three.module.js"
-// curl -o js/three.module.js https://cdn.jsdelivr.net/npm/three@0.166.0
-// curl -o js/examples/jsm/loaders/PLYLoader.js https://cdn.jsdelivr.net/npm/three@0.166.0/examples/jsm/loaders/PLYLoader.js
-// curl -o js/examples/jsm/loaders/GLTFLoader.js https://cdn.jsdelivr.net/npm/three@0.166.0/examples/jsm/loaders/GLTFLoader.js
-// curl -o js/examples/jsm/loaders/OBJLoader.js https://cdn.jsdelivr.net/npm/three@0.166.0/examples/jsm/loaders/OBJLoader.js
-// curl -o js/examples/jsm/loaders/MTLLoader.js https://cdn.jsdelivr.net/npm/three@0.166.0/examples/jsm/loaders/MTLLoader.js
-// curl -o js/examples/jsm/controls/OrbitControls.js https://cdn.jsdelivr.net/npm/three@0.166.0/examples/jsm/controls/OrbitControls.js
-// curl -o js/examples/jsm/utils/BufferGeometryUtils.js https://cdn.jsdelivr.net/npm/three@0.166.0/examples/jsm/utils/BufferGeometryUtils.js
+        //import * as THREE from "three"
 
-        import * as THREE from "three"
-        import { OrbitControls } from "./js/examples/jsm/controls/OrbitControls.js"
-        import { PLYLoader } from "./js/examples/jsm/loaders/PLYLoader.js"
-        import { GLTFLoader } from "./js/examples/jsm/loaders/GLTFLoader.js"
-        import { OBJLoader } from "./js/examples/jsm/loaders/OBJLoader.js"
-        import { MTLLoader } from "./js/examples/jsm/loaders/MTLLoader.js" // For more complex OBJ files with MTL
-
+        import { setupScene, loadPLYModel, downloadModel } from "./mesh.js";
 
         document.addEventListener("DOMContentLoaded", async function () {
-            let mesh
-            let rotated = false
-            var imgCount = 0
-            const outCanvas = document.getElementById("outCanvas")
-            const outCanvasCtx = outCanvas.getContext("2d")
-            const step = Math.floor(outCanvas.width / 360) // pixel width to extract while spinning
-            console.log(step)
-            const downloadBtn = document.getElementById("downloadBtn")
-            downloadBtn.addEventListener("click", () => {
-                const outCanvasUrl = outCanvas.toDataURL("image/png")
-                const link = document.createElement("a")
-                link.href = outCanvasUrl
-                link.download = "image.png"
-                document.body.appendChild(link)
-                link.click()
-                document.body.removeChild(link)
-            })
-            const meshCanvas = document.getElementById("meshCanvas")
 
-            const scene = new THREE.Scene()
-
-            const light = new THREE.SpotLight()
-            light.position.set(0, 20, 20)
-            scene.add(light)
-
-            const camera = new THREE.PerspectiveCamera(3, window.innerWidth / window.innerHeight, 0.1, 1000)
-
-            const renderer = new THREE.WebGLRenderer({ canvas: meshCanvas, antialias: true, preserveDrawingBuffer: true })
-            renderer.setSize(window.innerWidth, window.innerHeight)
-            document.body.appendChild(renderer.domElement)
-
-            // For rotating AROUND object
-            const pivot = new THREE.Object3D()
-            pivot.position.copy(scene.position)
-            scene.add(pivot)
-            pivot.add(camera)
-            camera.position.set(0, 0, 1.2)
-
-
-            const controls = new OrbitControls(camera, renderer.domElement)
-            controls.enableDamping = true
-
+            setupScene();
+/*
             // Load the OBJ model
             const mtlLoader = new MTLLoader()
             const materials = await mtlLoader.loadAsync("./models/benhead/benhead.mtl")
@@ -90,7 +59,7 @@
             objLoader.setMaterials(materials)
             const model = await objLoader.loadAsync("./models/benhead/benhead.obj")
             scene.add(model)
-
+*/
 /*
             const loader = new GLTFLoader()
             loader.load("./benhead.glb", function (gltf) {
@@ -109,91 +78,9 @@
             })
 */
 
-/*
-            const loader = new PLYLoader()
-            loader.load("./benhead.ply", function (geometry) {
-                    geometry.computeVertexNormals() // Important for proper lighting
 
-                    // Texture
-                    //const textureLoader = new THREE.TextureLoader()
-                    //const colorTexture = textureLoader.load("textures/brick_color.jpg") // Replace with your texture path
-                    const material = new THREE.MeshStandardMaterial({
-                        color: 0x0000ff00, // Example color, or use vertex colors if available in PLY
-                        flatShading: false,
-                    })
 
-                    mesh = new THREE.Mesh(geometry, material)
-                    mesh.rotateX(-Math.PI / 2)
-                    //mesh.rotateZ(-Math.PI / 2)
-                    //mesh.rotateY(-Math.PI / 2)
-                    scene.add(mesh)
-                },
-                undefined, // Progress callback
-                function (error) {
-                    console.error("An error occurred while loading the PLY model:", error)
-                }
-            )
-*/
-            const ambientLight = new THREE.AmbientLight(0x404040) // Soft white light
-            scene.add(ambientLight)
 
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 2)
-            directionalLight.position.set(1, 1, 1).normalize()
-            scene.add(directionalLight)
-
-            function capture(num) {
-                const imgDataUrl = renderer.domElement.toDataURL()
-                // use the image data or upload it to the backend*
-                const img = new Image()
-                img.src = imgDataUrl
-
-                img.onload = () => {
-                    const tempCanvas = document.createElement("canvas")
-                    tempCanvas.width = img.width
-                    tempCanvas.height = img.height
-                    const tempCtx = tempCanvas.getContext("2d")
-                    tempCtx.drawImage(img, 0, 0)
-                    const centerX = meshCanvas.width / 2
-                    const centerY = meshCanvas.height / 2
-                    const x = centerX - (step / 2)
-                    const y = centerY - 300
-                    const width = step
-                    const height = 600
-
-                    const imageData = tempCtx.getImageData(x, y, width, height)
-                    const croppedCanvas = document.createElement("canvas")
-                    // put on large canvas
-                    outCanvasCtx.putImageData(imageData, num * step, 0)
-                    //outCanvasCtx.drawImage(imageData, num + 10, 0)
-
-                }
-            }
-            var lastRotation = 0
-            function animate() {
-                requestAnimationFrame(animate)
-                controls.update()
-                renderer.render(scene, camera)
-                //mesh.rotation.z += 0.01
-                //const currentRotationYInDegrees = THREE.MathUtils.radToDeg(mesh.rotation.y);
-                pivot.rotation.y += 0.01
-                const currentRotationYInDegrees = THREE.MathUtils.radToDeg(pivot.rotation.y);
-                if (rotated === false) {
-                    const rot = Math.floor(currentRotationYInDegrees)
-                    if (rot >= 360) {
-                        console.log("rotated")
-                        rotated = true
-                        downloadBtn.removeAttribute("disabled")
-                        pivot.rotation.y = 0
-                    } else if (rot > lastRotation) {
-                        capture(imgCount)
-                        //console.log("capture", imgCount, "rot", rot)
-                        imgCount++
-                        lastRotation = rot
-                    }
-                }
-            }
-
-            animate()
         })
     </script>
 </body>

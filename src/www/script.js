@@ -52,7 +52,7 @@ function stopDrawing() {
   isDrawing = false
 }
 
-// Image upload and pixel loading
+// load image and pixelate to canvas grid size
 function loadPixels(evt) {
   const file = imageUpload.files[0]
   if (!file) {
