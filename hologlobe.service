@@ -4,6 +4,8 @@
 # sudo systemctl enable hologlobe.service
 [Unit]
 Description=Start hologlobe app
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 WorkingDirectory=/home/pi
