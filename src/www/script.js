@@ -1,5 +1,6 @@
 const canvasContainer = document.getElementById("canvas-container")
 const imageUpload = document.getElementById("imageUpload")
+const colorPicker = document.getElementById("colorPicker")
 
 let width, height
 let rotate = false
@@ -7,6 +8,8 @@ let rotate = false
 let pixels = [] // Stores the color of each pixel
 let isDrawing = false
 let activeWall = false
+let currentColor = colorPicker.value
+let originalOverflow
 
 function setGrid(h, w, r) {
   width = w
@@ -23,34 +26,71 @@ function createGrid() {
   canvasContainer.style.gridTemplateRows = `repeat(${rows}, 1fr)`
   pixels = []
 
-  for (let i = 0; i < rows * cols; i++) {
-    const pixel = document.createElement("div")
-    pixel.classList.add("pixel")
-    pixel.dataset.index = i
-    pixel.style.backgroundColor = "#000000" // Default white
-    pixel.addEventListener("mousedown", startDrawing)
-    pixel.addEventListener("mouseover", draw)
-    canvasContainer.appendChild(pixel)
-    pixels.push("#000000") // Store default color
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const pixel = document.createElement("div")
+      pixel.classList.add("pixel")
+      pixel.dataset.x = x
+      pixel.dataset.y = y
+      pixel.style.backgroundColor = "#000000" // Default black
+      canvasContainer.appendChild(pixel)
+    }
   }
 }
 
-function startDrawing(event) {
+function startDrawing(e) {
   isDrawing = true
-  draw(event)
+  originalOverflow = document.documentElement.style.overflow
+  document.documentElement.style.overflow = "hidden"
+
+  // Handle single-pixel touch/click
+  if (e.target.classList.contains("pixel")) {
+    e.target.style.backgroundColor = currentColor
+  }
 }
 
-function draw(event) {
+const continueDrawing = (e) => {
   if (!isDrawing) return
-  if (event.target.classList.contains("pixel")) {
-    event.target.style.backgroundColor = colorPicker.value
-    pixels[event.target.dataset.index] = colorPicker.value
+
+  // Use `e.target` for mouse events
+  if (e.type === "mousemove" && e.target.classList.contains("pixel")) {
+    e.target.style.backgroundColor = currentColor
+  }
+
+  // For touch events, find the element at the touch coordinates
+  if (e.type === "touchmove") {
+    const touch = e.touches[0]
+    const targetElement = document.elementFromPoint(touch.clientX, touch.clientY)
+    if (targetElement && targetElement.classList.contains("pixel")) {
+      targetElement.style.backgroundColor = currentColor
+    }
+    e.preventDefault() // Prevent scrolling
   }
 }
 
 function stopDrawing() {
   isDrawing = false
+  document.documentElement.style.overflow = originalOverflow
 }
+
+const updateColor = (e) => {
+  currentColor = e.target.value
+}
+
+// Mouse events
+canvasContainer.addEventListener("mousedown", startDrawing)
+window.addEventListener("mouseup", stopDrawing)
+canvasContainer.addEventListener("mouseleave", stopDrawing)
+canvasContainer.addEventListener("mousemove", continueDrawing)
+
+// Touch events
+canvasContainer.addEventListener("touchstart", startDrawing, { passive: false })
+window.addEventListener("touchend", stopDrawing)
+canvasContainer.addEventListener("touchcancel", stopDrawing)
+canvasContainer.addEventListener("touchmove", continueDrawing, { passive: false })
+
+// Other controls
+colorPicker.addEventListener("change", updateColor)
 
 // load image and pixelate to canvas grid size
 function loadPixels(evt) {
@@ -210,9 +250,5 @@ function download(evt) {
 function clearCanvas() {
   createGrid() // Re-initialize with default white pixels
 }
-
-// Event listeners for drawing
-document.addEventListener("mouseup", stopDrawing)
-canvasContainer.addEventListener("mouseleave", stopDrawing)
 
 export { setGrid, createGrid, loadPixels, clearCanvas, download, sendImage, toggleActive, start }

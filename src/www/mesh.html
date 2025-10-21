@@ -33,7 +33,18 @@
         </div>
         <div class="controls">
             <ul>
-                <li><input type="file" id="fileUpload" accept=".ply, text/plain" /></li>
+                <li>
+                    <label for="plyUpload">PLY</label>
+                    <input type="file" id="plyUpload" accept=".ply, text/plain" />
+                </li>
+                <li>
+                    <label for="gltfUpload">GLTF</label>
+                    <input type="file" id="gltfUpload" accept=".gltf, .glb, text/plain" />
+                </li>
+                <li>
+                    <label for="plyUpload">OBJ</label>
+                    <input type="file" id="objUpload" accept=".obj, text/plain" />
+                </li>
                 <li><button id="startBtn">kjør!</button></li>
                 <li><button id="clearBtn">tøm</button></li>
                 <li><button id="downloadBtn" disabled>Last ned PNG</button></li>
@@ -44,42 +55,10 @@
     <script type="module">
         //import * as THREE from "three"
 
-        import { setupScene, loadPLYModel, downloadModel } from "./mesh.js";
+        import { setupScene } from "./mesh.js";
 
         document.addEventListener("DOMContentLoaded", async function () {
-
             setupScene();
-/*
-            // Load the OBJ model
-            const mtlLoader = new MTLLoader()
-            const materials = await mtlLoader.loadAsync("./models/benhead/benhead.mtl")
-            materials.preload()
-            const objLoader = new OBJLoader()
-            objLoader.setMaterials(materials)
-            const model = await objLoader.loadAsync("./models/benhead/benhead.obj")
-            scene.add(model)
-*/
-/*
-            const loader = new GLTFLoader()
-            loader.load("./benhead.glb", function (gltf) {
-                // Add the loaded model to the scene
-                scene.add(gltf.scene);
-
-                // Optional: Access and manipulate textures or materials if needed
-                gltf.scene.traverse((child) => {
-                    if (child.isMesh) {
-                        // Example: Check if a material has a map (texture)
-                        if (child.material.map) {
-                            console.log('Texture found on:', child.name);
-                        }
-                    }
-                })
-            })
-*/
-
-
-
-
         })
     </script>
 </body>

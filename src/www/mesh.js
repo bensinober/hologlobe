@@ -15,12 +15,16 @@ import { GLTFLoader } from "./js/examples/jsm/loaders/GLTFLoader.js"
 import { OBJLoader } from "./js/examples/jsm/loaders/OBJLoader.js"
 import { MTLLoader } from "./js/examples/jsm/loaders/MTLLoader.js" // For more complex OBJ files with MTL
 
-const fileUpload = document.getElementById("fileUpload")
+const plyUpload = document.getElementById("plyUpload")
+const gltfUpload = document.getElementById("gltfUpload")
+const objUpload = document.getElementById("objUpload")
 const outCanvas = document.getElementById("outCanvas")
 const outCanvasCtx = outCanvas.getContext("2d")
 const meshCanvas = document.getElementById("meshCanvas")
 
-fileUpload.addEventListener("change", loadPLYModel)
+plyUpload.addEventListener("change", loadPLYModel)
+gltfUpload.addEventListener("change", loadGLTFModel)
+objUpload.addEventListener("change", loadObjModel)
 document.getElementById("startBtn").addEventListener("click", start)
 document.getElementById("clearBtn").addEventListener("click", clearOutCanvas)
 document.getElementById("downloadBtn").addEventListener("click", downloadModel)
@@ -72,8 +76,9 @@ function readFileAsync(file) {
   })
 }
 
+// PLY pointcloud to mesh
 async function loadPLYModel(evt) {
-  const file = fileUpload.files[0]
+  const file = plyUpload.files[0]
   if (!file) {
     alert("Please select a PLY file to upload.")
     return
@@ -82,7 +87,7 @@ async function loadPLYModel(evt) {
     const arrayBuffer = await readFileAsync(file)
     const loader = new PLYLoader()
     const geometry = loader.parse(arrayBuffer)
-    geometry.computeVertexNormals() // Important for proper lighting
+    //geometry.computeVertexNormals() // Important for proper lighting
     // Texture
     //const textureLoader = new THREE.TextureLoader()
     //const colorTexture = textureLoader.load("textures/brick_color.jpg") // Replace with your texture path
@@ -99,6 +104,56 @@ async function loadPLYModel(evt) {
     animate()
   } catch (err) {
     console.error("An error occurred while loading the PLY model:", err)
+  }
+}
+
+async function loadGLTFModel(evt) {
+  const file = gltfUpload.files[0]
+  if (!file) {
+    alert("Please select an GLB file to upload.")
+    return
+  }
+  try {
+    const arrayBuffer = await readFileAsync(file)
+    // Load the OBJ model
+    const loader = new GLTFLoader()
+    const gltf = await loader.parseAsync(arrayBuffer)
+    console.log(gltf, arrayBuffer)
+    scene.add(gltf.scene)
+
+    // Optional: Access and manipulate textures or materials if needed
+    gltf.scene.traverse((child) => {
+      if (child.isMesh) {
+        // Example: Check if a material has a map (texture)
+        if (child.material.map) {
+          console.log('Texture found on:', child.name)
+        }
+      }
+    })
+    animate()
+  } catch (err) {
+    console.error("An error occurred while loading the GLTF model:", err)
+  }
+}
+async function loadObjModel(evt) {
+  const file = objUpload.files[0]
+  if (!file) {
+    alert("Please select an OBJ file to upload.")
+    return
+  }
+  try {
+    const arrayBuffer = await readFileAsync(file)
+    // Load the OBJ model
+    const loader = new OBJLoader()
+    const mtlLoader = new MTLLoader()
+    const materials = await mtlLoader.loadAsync("./models/benhead/benhead.mtl")
+    materials.preload()
+    loader.setMaterials(materials)
+    const object = loader.parse(new TextDecoder().decode(arrayBuffer))
+    scene.add(object)
+    animate()
+  } catch (err) {
+    console.error("An error occurred while loading the OBJ model:", err)
   }
 }
 
@@ -133,6 +188,7 @@ function capture(num) {
 var lastRotation = 0
 let capturing = false
 var imgCount = 0
+
 // rorate scene and capture for every degree until fully rotated once
 function animate() {
   requestAnimationFrame(animate)
@@ -180,4 +236,4 @@ function clearOutCanvas() {
   imgCount = 0
 }
 
-export { setupScene, loadPLYModel, downloadModel }
+export { setupScene, loadPLYModel, loadGLTFModel, loadObjModel, downloadModel }
