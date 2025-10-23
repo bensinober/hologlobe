@@ -190,40 +190,6 @@ async function uploadRawPngBytes(bytes) {
   }
 }
 
-async function toggleActive() {
-  try {
-    const res = await fetch("/toggleActive", { method: "PUT" })
-    if (res.ok) {
-      console.log("Toggled successfully!")
-      activeWall = !activeWall
-      if (activeWall) {
-        document.getElementById("toggleButton").classList.add("active")
-        document.getElementById("toggleButton").innerText = "Stopp"
-      } else {
-        document.getElementById("toggleButton").classList.remove("active")
-        document.getElementById("toggleButton").innerText = "Kjør"
-      }
-    } else {
-      console.error("Failed to toggle active: ", res.statusText)
-    }
-  } catch (err) {
-    console.log(err)
-  }
-}
-
-async function start() {
-  try {
-    const res = await fetch("/start", { method: "PUT" })
-    if (res.ok) {
-      console.log("started successfully!")
-    } else {
-      console.error("Failed to start wall: ", res.statusText)
-    }
-  } catch (err) {
-    console.log(err)
-  }
-}
-
 function download(evt) {
   const tempCanvas = document.createElement("canvas")
   tempCanvas.width = width
@@ -247,8 +213,18 @@ function download(evt) {
   link.click()
 }
 
+function setMode(e) {
+  const mode = e.target.value
+  console.log(mode)
+  try {
+    fetch(`/setMode/${mode}`)
+  } catch (err) {
+    console.log(err)
+  }
+}
+
 function clearCanvas() {
   createGrid() // Re-initialize with default white pixels
 }
 
-export { setGrid, createGrid, loadPixels, clearCanvas, download, sendImage, toggleActive, start }
+export { setGrid, createGrid, setMode, loadPixels, clearCanvas, download, sendImage }

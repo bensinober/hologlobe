@@ -36,6 +36,27 @@ const BTN_A_PIN = 17; // pin 13 -> GPIO17
 const ROT_A_PIN = 5; // pin 29 -> GPIO5
 const ROT_B_PIN = 6; // pin 31 -> GPIO6
 
+// Global LED Mode
+pub const LEDMode = enum(u8) {
+    IDLE,
+    CALIBRATE,
+    DRAW,
+    RUNONCE,
+    ANIMATION,
+    _,
+
+    pub fn enum2str(self: LEDMode) []u8 {
+        return std.meta.fields(?LEDMode)[self];
+    }
+    pub fn str2enum(str: []const u8) ?LEDMode {
+        return std.meta.stringToEnum(LEDMode, str) orelse LEDMode.IDLE;
+    }
+};
+
+// initial mode
+var ledMode = LEDMode.IDLE;
+var lastLedMode = LEDMode.IDLE;
+
 pub const Server = struct {
     allocator: Allocator,
     listener: std.net.Server,
@@ -114,23 +135,23 @@ pub const Server = struct {
         } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/cycleColumns")) {
             self.ledController.cycleColumns(0xff0000);
             try req.respond("CYCLE", .{ .status = .ok, .transfer_encoding = .chunked });
-        } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/toggleActive")) {
-            self.ledController.toggleActive();
-            const response = std.fmt.allocPrint(self.allocator, "NEW STATE: {any}\n", .{self.ledController.activeMatrix}) catch @panic("Failed to format status line");
-            try req.respond(response, .{ .status = .ok, .transfer_encoding = .chunked });
+        } else if (req.head.method == .GET and std.mem.startsWith(u8, req.head.target, "/setMode")) {
+            var paths = std.mem.splitScalar(u8, req.head.target, '/');
+            var i: usize = 0;
+            while (paths.next()) |p| {
+                if (i == 2) {
+                    const mode = LEDMode.str2enum(p);
+                    std.debug.print("NEW LedMode {any}!\n", .{mode});
+                    ledMode = mode.?;
+                }
+                i += 1;
+            }
+            try req.respond("OK", .{ .status = .ok, .transfer_encoding = .chunked });
+        } else if (req.head.method == .GET and std.mem.eql(u8, req.head.target, "/getMode")) {
+            try req.respond(@tagName(ledMode), .{ .status = .ok, .transfer_encoding = .chunked });
         } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/firstRow")) {
             try self.ledController.runFirstRow();
             try req.respond("TEST", .{ .status = .ok, .transfer_encoding = .chunked });
-        } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/runOnce")) {
-            try self.ledController.runOnce();
-            const response = std.fmt.allocPrint(self.allocator, "NEW STATE: {any}\n", .{self.ledController.activeMatrix}) catch @panic("Failed to format status line");
-            try req.respond(response, .{ .status = .ok, .transfer_encoding = .chunked });
-        } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/start")) {
-            const thread = try std.Thread.spawn(.{}, LedControl.runMatrix, .{self.ledController});
-            thread.detach();
-            const response = std.fmt.allocPrint(self.allocator, "matrix started in thread: {any}\n", .{thread}) catch @panic("Failed to set matrix");
-            try req.respond(response, .{});
-            // Raw image data uploaded from js clampedUint8Array, can set LedControl Matrix directly
         } else if (req.head.method == .POST and std.mem.eql(u8, req.head.target, "/uploadRawImg")) {
             var len: usize = 0;
             if (req.head.content_length) |contLen| {
@@ -261,7 +282,7 @@ pub const LedControl = struct {
     const Self = @This();
 
     ptr: [*c]ws2811.ws2811_t,
-    activeMatrix: bool,
+    calibrationMatrix: ImageMat,
     imgMatrix: ImageMat,
     allocator: Allocator,
     mutex: std.Thread.Mutex,
@@ -269,7 +290,7 @@ pub const LedControl = struct {
     pub fn init(allocator: Allocator, ledstrip: [*c]ws2811.ws2811_t) !Self {
         return Self{
             .ptr = ledstrip,
-            .activeMatrix = true,
+            .calibrationMatrix = undefined,
             .imgMatrix = undefined,
             .allocator = allocator,
             .mutex = std.Thread.Mutex{},
@@ -289,7 +310,7 @@ pub const LedControl = struct {
         defer self.mutex.unlock();
         const mat = try imgbytes2matrix(&img.DATA);
         const imageMat: ImageMat = .{ .mat = mat };
-        self.imgMatrix = imageMat;
+        self.calibrationMatrix = imageMat;
     }
 
     pub fn setImg(self: *Self, imageBytes: []u8) !void {
@@ -363,6 +384,21 @@ pub const LedControl = struct {
         }
     }
 
+    pub fn renderCalibration(self: *Self) void {
+        const mat = self.calibrationMatrix;
+        const half = LEDSTRIP_ROWS / 2; // split rows in two, one for each strip
+        for (0..half) |i| {
+            for (0..LEDSTRIP_COLS) |j| {
+                self.setPixel(0, j, mat.mat[i][j]);
+                self.setPixel(1, j, mat.mat[i + half][j]);
+            }
+            if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
+                _ = ws2811.ws2811_render(self.ptr); // show row
+            }
+            //std.Thread.sleep(325000); // sleep 350us to balance frame rate of 5Hz
+        }
+    }
+
     pub fn lightAllLeds(self: *Self, col: u32) void {
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
             var i: usize = 0;
@@ -398,10 +434,6 @@ pub const LedControl = struct {
         std.Thread.sleep(1000 * 1000 * 1000);
     }
 
-    pub fn toggleActive(self: *Self) void {
-        self.activeMatrix = !self.activeMatrix;
-    }
-
     pub fn runOnce(self: *Self) !void {
         const start = try std.time.Instant.now();
         self.renderImg();
@@ -430,15 +462,33 @@ pub const LedControl = struct {
         return buf;
     }
 
-    // event loop running in thread, set activeMatrix first
+    // event loop running in thread
     pub fn runMatrix(self: *Self) !void {
-        while (self.activeMatrix == true) {
-            //ledController.rows(0xff0000);
-            //ledController.cols(0x00ff00);
-            const start = try std.time.Instant.now();
-            self.renderImg();
-            const end = try std.time.Instant.now();
-            std.debug.print("ns spent on full render: {}\n", .{end.since(start)});
+        while (true) {
+            switch (ledMode) {
+                .IDLE => {
+                    std.Thread.sleep(1000 * 1000); // to ease cpu
+                },
+                .CALIBRATE => {
+                    self.renderCalibration();
+                },
+                .DRAW => {
+                    std.Thread.sleep(1000 * 1000); // to ease cpu
+                },
+                .RUNONCE => {
+                    self.renderImg();
+                    ledMode = LEDMode.IDLE;
+                },
+                .ANIMATION => {
+                    const start = try std.time.Instant.now();
+                    self.renderImg();
+                    const end = try std.time.Instant.now();
+                    std.debug.print("ns spent on full render: {}\n", .{end.since(start)});
+                },
+                else => {
+                    std.debug.print("UNKNOWN STATE", .{});
+                },
+            }
         }
     }
 
@@ -535,15 +585,6 @@ pub fn main() !void {
             },
         };
         _ = ws2811.ws2811_init(&ledstrip);
-
-        // while (true) {
-        //     //try control.pollButtonEvents();
-        //     const start = try std.time.Instant.now();
-        //     renderImg(&ledstrip, imgMatrix);
-        //     const end = try std.time.Instant.now();
-        //     std.debug.print("ns spent on full render: {}\n", .{end.since(start)});
-        //     std.Thread.sleep(1000 * 1000); // 1ms
-        // }
     }
     // SPI AND DISPLAY INIT
     if (arch != std.Target.Cpu.Arch.x86_64) {
@@ -605,6 +646,10 @@ pub fn main() !void {
     var ledController = try LedControl.init(allocator, &ledstrip);
     try ledController.setInitialImg();
     defer ledController.deinit();
+
+    // spawn ledrunner in separate thread
+    const ledThread = try std.Thread.spawn(.{}, LedControl.runMatrix, .{&ledController});
+    ledThread.detach();
 
     var server = try Server.init(allocator, 8765, controller, &ledController);
     defer server.deinit();
