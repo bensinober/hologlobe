@@ -35,17 +35,17 @@ if __name__ == "__main__":
 
     #         #out.putpixel((y, width - x - 1), (r,g,b))
     #         out.putpixel((height - y - 1, x), (r,g,b))
-    pixels = rotated.load()
-    #pixels = im.load()
+    #pixels = rotated.load()
+    pixels = im.load()
     for y in range(0, width):
         for x in range(0, height):
             #if x == 2:
             #    break
             r, g, b, a = pixels[x, y]
-            f.write("%s, " % hex(a))
-            f.write("%s, " % hex(g))
             f.write("%s, " % hex(r))
+            f.write("%s, " % hex(g))
             f.write("%s, " % hex(b))
+            f.write("%s, " % hex(a))
     f.write("};\n")
     f.close()
     #rotated.save("output.png")
