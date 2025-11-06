@@ -369,7 +369,6 @@ pub const LedControl = struct {
     // render img to two strips, split in half, display in each channel
     // source image is 50x100 24bit, rotated and
     pub fn renderImg(self: *Self) void {
-        // mat: [img.ROWS][img.COLS][4]u8
         const mat = self.imgMatrix;
         const half = LEDSTRIP_ROWS / 2; // split rows in two, one for each strip
         for (0..half) |i| {

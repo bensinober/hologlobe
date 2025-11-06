@@ -32,27 +32,6 @@ Yes, it may actually burn up. That's why it needs to be contained.
 clone this repo and continue to [Installation](docs/Installation.md)
 and  [Documentation](docs/Documentation.md)
 
-
-## Other noteworthy projects
-
-Coming to the skaperfestival 25
-
-*Deichman LED wall* : programmable 2x3 meters led wall made by cups and leds
-
-![rainbow ledwall wall](images/ledwall-rainbow.jpg)
-![deichman led wall](images/deichmanLedWall.png)
-
-*Hoverglobe* : floating illuminated sphere using magnets and leds
-
-![hoverglobe](images/hoverglobe.jpg)
-
-*laserprojector* :
-
-Galvo Laser projects for projecting drawings with laser on wall or similar
-
-![laserprojector](images/laserprojector.png)
-
-
 ## Documentation
 
 [Separate documentation](docs/Documentation.md)
