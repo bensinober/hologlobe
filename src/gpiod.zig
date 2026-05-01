@@ -1,216 +1,180 @@
-pub const struct_timeval = extern struct {
-    tv_sec: c_long,
-    tv_usec: c_long,
-};
-pub const struct_timespec = extern struct {
-    tv_sec: c_long,
-    tv_nsec: c_long,
-};
 pub const struct_gpiod_chip = opaque {};
-pub const struct_gpiod_line = opaque {};
-pub const struct_gpiod_chip_iter = opaque {};
-pub const struct_gpiod_line_iter = opaque {};
-pub const struct_gpiod_line_bulk = extern struct {
-    lines: [64]?*struct_gpiod_line,
-    num_lines: c_uint,
-};
-pub const GPIOD_CTXLESS_FLAG_OPEN_DRAIN: c_int = 1;
-pub const GPIOD_CTXLESS_FLAG_OPEN_SOURCE: c_int = 2;
-pub const GPIOD_CTXLESS_FLAG_BIAS_DISABLE: c_int = 4;
-pub const GPIOD_CTXLESS_FLAG_BIAS_PULL_DOWN: c_int = 8;
-pub const GPIOD_CTXLESS_FLAG_BIAS_PULL_UP: c_int = 16;
-pub extern fn gpiod_ctxless_get_value(device: [*c]const u8, offset: c_uint, active_low: bool, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_ctxless_get_value_ext(device: [*c]const u8, offset: c_uint, active_low: bool, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_ctxless_get_value_multiple(device: [*c]const u8, offsets: [*c]const c_uint, values: [*c]c_int, num_lines: c_uint, active_low: bool, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_ctxless_get_value_multiple_ext(device: [*c]const u8, offsets: [*c]const c_uint, values: [*c]c_int, num_lines: c_uint, active_low: bool, consumer: [*c]const u8, flags: c_int) c_int;
-pub const gpiod_ctxless_set_value_cb = ?*const fn (?*anyopaque) callconv(.C) void;
-pub extern fn gpiod_ctxless_set_value(device: [*c]const u8, offset: c_uint, value: c_int, active_low: bool, consumer: [*c]const u8, cb: gpiod_ctxless_set_value_cb, data: ?*anyopaque) c_int;
-pub extern fn gpiod_ctxless_set_value_ext(device: [*c]const u8, offset: c_uint, value: c_int, active_low: bool, consumer: [*c]const u8, cb: gpiod_ctxless_set_value_cb, data: ?*anyopaque, flags: c_int) c_int;
-pub extern fn gpiod_ctxless_set_value_multiple(device: [*c]const u8, offsets: [*c]const c_uint, values: [*c]const c_int, num_lines: c_uint, active_low: bool, consumer: [*c]const u8, cb: gpiod_ctxless_set_value_cb, data: ?*anyopaque) c_int;
-pub extern fn gpiod_ctxless_set_value_multiple_ext(device: [*c]const u8, offsets: [*c]const c_uint, values: [*c]const c_int, num_lines: c_uint, active_low: bool, consumer: [*c]const u8, cb: gpiod_ctxless_set_value_cb, data: ?*anyopaque, flags: c_int) c_int;
-pub const GPIOD_CTXLESS_EVENT_RISING_EDGE: c_int = 1;
-pub const GPIOD_CTXLESS_EVENT_FALLING_EDGE: c_int = 2;
-pub const GPIOD_CTXLESS_EVENT_BOTH_EDGES: c_int = 3;
-pub const GPIOD_CTXLESS_EVENT_CB_TIMEOUT: c_int = 1;
-pub const GPIOD_CTXLESS_EVENT_CB_RISING_EDGE: c_int = 2;
-pub const GPIOD_CTXLESS_EVENT_CB_FALLING_EDGE: c_int = 3;
-pub const GPIOD_CTXLESS_EVENT_CB_RET_ERR: c_int = -1;
-pub const GPIOD_CTXLESS_EVENT_CB_RET_OK: c_int = 0;
-pub const GPIOD_CTXLESS_EVENT_CB_RET_STOP: c_int = 1;
-pub const gpiod_ctxless_event_handle_cb = ?*const fn (c_int, c_uint, [*c]const struct_timespec, ?*anyopaque) callconv(.C) c_int;
-pub const GPIOD_CTXLESS_EVENT_POLL_RET_STOP: c_int = -2;
-pub const GPIOD_CTXLESS_EVENT_POLL_RET_ERR: c_int = -1;
-pub const GPIOD_CTXLESS_EVENT_POLL_RET_TIMEOUT: c_int = 0;
-pub const struct_gpiod_ctxless_event_poll_fd = extern struct {
-    fd: c_int,
-    event: bool,
-};
-pub const gpiod_ctxless_event_poll_cb = ?*const fn (c_uint, [*c]struct_gpiod_ctxless_event_poll_fd, [*c]const struct_timespec, ?*anyopaque) callconv(.C) c_int;
-pub extern fn gpiod_ctxless_event_loop(device: [*c]const u8, offset: c_uint, active_low: bool, consumer: [*c]const u8, timeout: [*c]const struct_timespec, poll_cb: gpiod_ctxless_event_poll_cb, event_cb: gpiod_ctxless_event_handle_cb, data: ?*anyopaque) c_int;
-pub extern fn gpiod_ctxless_event_loop_multiple(device: [*c]const u8, offsets: [*c]const c_uint, num_lines: c_uint, active_low: bool, consumer: [*c]const u8, timeout: [*c]const struct_timespec, poll_cb: gpiod_ctxless_event_poll_cb, event_cb: gpiod_ctxless_event_handle_cb, data: ?*anyopaque) c_int;
-pub extern fn gpiod_ctxless_event_monitor(device: [*c]const u8, event_type: c_int, offset: c_uint, active_low: bool, consumer: [*c]const u8, timeout: [*c]const struct_timespec, poll_cb: gpiod_ctxless_event_poll_cb, event_cb: gpiod_ctxless_event_handle_cb, data: ?*anyopaque) c_int;
-pub extern fn gpiod_ctxless_event_monitor_ext(device: [*c]const u8, event_type: c_int, offset: c_uint, active_low: bool, consumer: [*c]const u8, timeout: [*c]const struct_timespec, poll_cb: gpiod_ctxless_event_poll_cb, event_cb: gpiod_ctxless_event_handle_cb, data: ?*anyopaque, flags: c_int) c_int;
-pub extern fn gpiod_ctxless_event_monitor_multiple(device: [*c]const u8, event_type: c_int, offsets: [*c]const c_uint, num_lines: c_uint, active_low: bool, consumer: [*c]const u8, timeout: [*c]const struct_timespec, poll_cb: gpiod_ctxless_event_poll_cb, event_cb: gpiod_ctxless_event_handle_cb, data: ?*anyopaque) c_int;
-pub extern fn gpiod_ctxless_event_monitor_multiple_ext(device: [*c]const u8, event_type: c_int, offsets: [*c]const c_uint, num_lines: c_uint, active_low: bool, consumer: [*c]const u8, timeout: [*c]const struct_timespec, poll_cb: gpiod_ctxless_event_poll_cb, event_cb: gpiod_ctxless_event_handle_cb, data: ?*anyopaque, flags: c_int) c_int;
-pub extern fn gpiod_ctxless_find_line(name: [*c]const u8, chipname: [*c]u8, chipname_size: usize, offset: [*c]c_uint) c_int;
+pub const struct_gpiod_chip_info = opaque {};
+pub const struct_gpiod_line_info = opaque {};
+pub const struct_gpiod_line_settings = opaque {};
+pub const struct_gpiod_line_config = opaque {};
+pub const struct_gpiod_request_config = opaque {};
+pub const struct_gpiod_line_request = opaque {};
+pub const struct_gpiod_info_event = opaque {};
+pub const struct_gpiod_edge_event = opaque {};
+pub const struct_gpiod_edge_event_buffer = opaque {};
 pub extern fn gpiod_chip_open(path: [*c]const u8) ?*struct_gpiod_chip;
-pub extern fn gpiod_chip_open_by_name(name: [*c]const u8) ?*struct_gpiod_chip;
-pub extern fn gpiod_chip_open_by_number(num: c_uint) ?*struct_gpiod_chip;
-pub extern fn gpiod_chip_open_by_label(label: [*c]const u8) ?*struct_gpiod_chip;
-pub extern fn gpiod_chip_open_lookup(descr: [*c]const u8) ?*struct_gpiod_chip;
 pub extern fn gpiod_chip_close(chip: ?*struct_gpiod_chip) void;
-pub extern fn gpiod_chip_name(chip: ?*struct_gpiod_chip) [*c]const u8;
-pub extern fn gpiod_chip_label(chip: ?*struct_gpiod_chip) [*c]const u8;
-pub extern fn gpiod_chip_num_lines(chip: ?*struct_gpiod_chip) c_uint;
-pub extern fn gpiod_chip_get_line(chip: ?*struct_gpiod_chip, offset: c_uint) ?*struct_gpiod_line;
-pub extern fn gpiod_chip_get_lines(chip: ?*struct_gpiod_chip, offsets: [*c]c_uint, num_offsets: c_uint, bulk: [*c]struct_gpiod_line_bulk) c_int;
-pub extern fn gpiod_chip_get_all_lines(chip: ?*struct_gpiod_chip, bulk: [*c]struct_gpiod_line_bulk) c_int;
-pub extern fn gpiod_chip_find_line(chip: ?*struct_gpiod_chip, name: [*c]const u8) ?*struct_gpiod_line;
-pub extern fn gpiod_chip_find_lines(chip: ?*struct_gpiod_chip, names: [*c][*c]const u8, bulk: [*c]struct_gpiod_line_bulk) c_int;
-
-pub fn gpiod_line_bulk_init(arg_bulk: [*c]struct_gpiod_line_bulk) callconv(.C) void {
-    const bulk = arg_bulk;
-    bulk.*.num_lines = 0;
-}
-pub fn gpiod_line_bulk_add(arg_bulk: [*c]struct_gpiod_line_bulk, arg_line: ?*struct_gpiod_line) callconv(.C) void {
-    const bulk = arg_bulk;
-    const line = arg_line;
-    bulk.*.lines[
-        blk: {
-            const ref = &bulk.*.num_lines;
-            const tmp = ref.*;
-            ref.* +%= 1;
-            break :blk tmp;
-        }
-    ] = line;
-}
-pub fn gpiod_line_bulk_get_line(arg_bulk: [*c]struct_gpiod_line_bulk, arg_offset: c_uint) callconv(.C) ?*struct_gpiod_line {
-    const bulk = arg_bulk;
-    const offset = arg_offset;
-    return bulk.*.lines[offset];
-}
-pub fn gpiod_line_bulk_num_lines(arg_bulk: [*c]struct_gpiod_line_bulk) callconv(.C) c_uint {
-    const bulk = arg_bulk;
-    return bulk.*.num_lines;
-}
-pub const GPIOD_LINE_DIRECTION_INPUT: c_int = 1;
-pub const GPIOD_LINE_DIRECTION_OUTPUT: c_int = 2;
-pub const GPIOD_LINE_ACTIVE_STATE_HIGH: c_int = 1;
-pub const GPIOD_LINE_ACTIVE_STATE_LOW: c_int = 2;
+pub extern fn gpiod_chip_get_info(chip: ?*struct_gpiod_chip) ?*struct_gpiod_chip_info;
+pub extern fn gpiod_chip_get_path(chip: ?*struct_gpiod_chip) [*c]const u8;
+pub extern fn gpiod_chip_get_line_info(chip: ?*struct_gpiod_chip, offset: c_uint) ?*struct_gpiod_line_info;
+pub extern fn gpiod_chip_watch_line_info(chip: ?*struct_gpiod_chip, offset: c_uint) ?*struct_gpiod_line_info;
+pub extern fn gpiod_chip_unwatch_line_info(chip: ?*struct_gpiod_chip, offset: c_uint) c_int;
+pub extern fn gpiod_chip_get_fd(chip: ?*struct_gpiod_chip) c_int;
+pub extern fn gpiod_chip_wait_info_event(chip: ?*struct_gpiod_chip, timeout_ns: i64) c_int;
+pub extern fn gpiod_chip_read_info_event(chip: ?*struct_gpiod_chip) ?*struct_gpiod_info_event;
+pub extern fn gpiod_chip_get_line_offset_from_name(chip: ?*struct_gpiod_chip, name: [*c]const u8) c_int;
+pub extern fn gpiod_chip_request_lines(chip: ?*struct_gpiod_chip, req_cfg: ?*struct_gpiod_request_config, line_cfg: ?*struct_gpiod_line_config) ?*struct_gpiod_line_request;
+pub extern fn gpiod_chip_info_free(info: ?*struct_gpiod_chip_info) void;
+pub extern fn gpiod_chip_info_get_name(info: ?*struct_gpiod_chip_info) [*c]const u8;
+pub extern fn gpiod_chip_info_get_label(info: ?*struct_gpiod_chip_info) [*c]const u8;
+pub extern fn gpiod_chip_info_get_num_lines(info: ?*struct_gpiod_chip_info) usize;
+pub const GPIOD_LINE_VALUE_ERROR: c_int = -1;
+pub const GPIOD_LINE_VALUE_INACTIVE: c_int = 0;
+pub const GPIOD_LINE_VALUE_ACTIVE: c_int = 1;
+pub const enum_gpiod_line_value = c_int;
+pub const GPIOD_LINE_DIRECTION_AS_IS: c_int = 1;
+pub const GPIOD_LINE_DIRECTION_INPUT: c_int = 2;
+pub const GPIOD_LINE_DIRECTION_OUTPUT: c_int = 3;
+pub const enum_gpiod_line_direction = c_uint;
+pub const GPIOD_LINE_EDGE_NONE: c_int = 1;
+pub const GPIOD_LINE_EDGE_RISING: c_int = 2;
+pub const GPIOD_LINE_EDGE_FALLING: c_int = 3;
+pub const GPIOD_LINE_EDGE_BOTH: c_int = 4;
+pub const enum_gpiod_line_edge = c_uint;
 pub const GPIOD_LINE_BIAS_AS_IS: c_int = 1;
-pub const GPIOD_LINE_BIAS_DISABLE: c_int = 2;
-pub const GPIOD_LINE_BIAS_PULL_UP: c_int = 3;
-pub const GPIOD_LINE_BIAS_PULL_DOWN: c_int = 4;
-pub extern fn gpiod_line_offset(line: ?*struct_gpiod_line) c_uint;
-pub extern fn gpiod_line_name(line: ?*struct_gpiod_line) [*c]const u8;
-pub extern fn gpiod_line_consumer(line: ?*struct_gpiod_line) [*c]const u8;
-pub extern fn gpiod_line_direction(line: ?*struct_gpiod_line) c_int;
-pub extern fn gpiod_line_active_state(line: ?*struct_gpiod_line) c_int;
-pub extern fn gpiod_line_bias(line: ?*struct_gpiod_line) c_int;
-pub extern fn gpiod_line_is_used(line: ?*struct_gpiod_line) bool;
-pub extern fn gpiod_line_is_open_drain(line: ?*struct_gpiod_line) bool;
-pub extern fn gpiod_line_is_open_source(line: ?*struct_gpiod_line) bool;
-pub extern fn gpiod_line_update(line: ?*struct_gpiod_line) c_int;
-pub extern fn gpiod_line_needs_update(line: ?*struct_gpiod_line) bool;
-pub const GPIOD_LINE_REQUEST_DIRECTION_AS_IS: c_int = 1;
-pub const GPIOD_LINE_REQUEST_DIRECTION_INPUT: c_int = 2;
-pub const GPIOD_LINE_REQUEST_DIRECTION_OUTPUT: c_int = 3;
-pub const GPIOD_LINE_REQUEST_EVENT_FALLING_EDGE: c_int = 4;
-pub const GPIOD_LINE_REQUEST_EVENT_RISING_EDGE: c_int = 5;
-pub const GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES: c_int = 6;
-pub const GPIOD_LINE_REQUEST_FLAG_OPEN_DRAIN: c_int = 1;
-pub const GPIOD_LINE_REQUEST_FLAG_OPEN_SOURCE: c_int = 2;
-pub const GPIOD_LINE_REQUEST_FLAG_ACTIVE_LOW: c_int = 4;
-pub const GPIOD_LINE_REQUEST_FLAG_BIAS_DISABLE: c_int = 8;
-pub const GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN: c_int = 16;
-pub const GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP: c_int = 32;
-pub const struct_gpiod_line_request_config = extern struct {
-    consumer: [*c]const u8,
-    request_type: c_int,
-    flags: c_int,
+pub const GPIOD_LINE_BIAS_UNKNOWN: c_int = 2;
+pub const GPIOD_LINE_BIAS_DISABLED: c_int = 3;
+pub const GPIOD_LINE_BIAS_PULL_UP: c_int = 4;
+pub const GPIOD_LINE_BIAS_PULL_DOWN: c_int = 5;
+pub const enum_gpiod_line_bias = c_uint;
+pub const GPIOD_LINE_DRIVE_PUSH_PULL: c_int = 1;
+pub const GPIOD_LINE_DRIVE_OPEN_DRAIN: c_int = 2;
+pub const GPIOD_LINE_DRIVE_OPEN_SOURCE: c_int = 3;
+pub const enum_gpiod_line_drive = c_uint;
+pub const GPIOD_LINE_CLOCK_MONOTONIC: c_int = 1;
+pub const GPIOD_LINE_CLOCK_REALTIME: c_int = 2;
+pub const GPIOD_LINE_CLOCK_HTE: c_int = 3;
+pub const enum_gpiod_line_clock = c_uint;
+pub extern fn gpiod_line_info_free(info: ?*struct_gpiod_line_info) void;
+pub extern fn gpiod_line_info_copy(info: ?*struct_gpiod_line_info) ?*struct_gpiod_line_info;
+pub extern fn gpiod_line_info_get_offset(info: ?*struct_gpiod_line_info) c_uint;
+pub extern fn gpiod_line_info_get_name(info: ?*struct_gpiod_line_info) [*c]const u8;
+pub extern fn gpiod_line_info_is_used(info: ?*struct_gpiod_line_info) bool;
+pub extern fn gpiod_line_info_get_consumer(info: ?*struct_gpiod_line_info) [*c]const u8;
+pub extern fn gpiod_line_info_get_direction(info: ?*struct_gpiod_line_info) enum_gpiod_line_direction;
+pub extern fn gpiod_line_info_get_edge_detection(info: ?*struct_gpiod_line_info) enum_gpiod_line_edge;
+pub extern fn gpiod_line_info_get_bias(info: ?*struct_gpiod_line_info) enum_gpiod_line_bias;
+pub extern fn gpiod_line_info_get_drive(info: ?*struct_gpiod_line_info) enum_gpiod_line_drive;
+pub extern fn gpiod_line_info_is_active_low(info: ?*struct_gpiod_line_info) bool;
+pub extern fn gpiod_line_info_is_debounced(info: ?*struct_gpiod_line_info) bool;
+pub extern fn gpiod_line_info_get_debounce_period_us(info: ?*struct_gpiod_line_info) c_ulong;
+pub extern fn gpiod_line_info_get_event_clock(info: ?*struct_gpiod_line_info) enum_gpiod_line_clock;
+pub const GPIOD_INFO_EVENT_LINE_REQUESTED: c_int = 1;
+pub const GPIOD_INFO_EVENT_LINE_RELEASED: c_int = 2;
+pub const GPIOD_INFO_EVENT_LINE_CONFIG_CHANGED: c_int = 3;
+pub const enum_gpiod_info_event_type = c_uint;
+pub extern fn gpiod_info_event_free(event: ?*struct_gpiod_info_event) void;
+pub extern fn gpiod_info_event_get_event_type(event: ?*struct_gpiod_info_event) enum_gpiod_info_event_type;
+pub extern fn gpiod_info_event_get_timestamp_ns(event: ?*struct_gpiod_info_event) u64;
+pub extern fn gpiod_info_event_get_line_info(event: ?*struct_gpiod_info_event) ?*struct_gpiod_line_info;
+pub extern fn gpiod_line_settings_new() ?*struct_gpiod_line_settings;
+pub extern fn gpiod_line_settings_free(settings: ?*struct_gpiod_line_settings) void;
+pub extern fn gpiod_line_settings_reset(settings: ?*struct_gpiod_line_settings) void;
+pub extern fn gpiod_line_settings_copy(settings: ?*struct_gpiod_line_settings) ?*struct_gpiod_line_settings;
+pub extern fn gpiod_line_settings_set_direction(settings: ?*struct_gpiod_line_settings, direction: enum_gpiod_line_direction) c_int;
+pub extern fn gpiod_line_settings_get_direction(settings: ?*struct_gpiod_line_settings) enum_gpiod_line_direction;
+pub extern fn gpiod_line_settings_set_edge_detection(settings: ?*struct_gpiod_line_settings, edge: enum_gpiod_line_edge) c_int;
+pub extern fn gpiod_line_settings_get_edge_detection(settings: ?*struct_gpiod_line_settings) enum_gpiod_line_edge;
+pub extern fn gpiod_line_settings_set_bias(settings: ?*struct_gpiod_line_settings, bias: enum_gpiod_line_bias) c_int;
+pub extern fn gpiod_line_settings_get_bias(settings: ?*struct_gpiod_line_settings) enum_gpiod_line_bias;
+pub extern fn gpiod_line_settings_set_drive(settings: ?*struct_gpiod_line_settings, drive: enum_gpiod_line_drive) c_int;
+pub extern fn gpiod_line_settings_get_drive(settings: ?*struct_gpiod_line_settings) enum_gpiod_line_drive;
+pub extern fn gpiod_line_settings_set_active_low(settings: ?*struct_gpiod_line_settings, active_low: bool) void;
+pub extern fn gpiod_line_settings_get_active_low(settings: ?*struct_gpiod_line_settings) bool;
+pub extern fn gpiod_line_settings_set_debounce_period_us(settings: ?*struct_gpiod_line_settings, period: c_ulong) void;
+pub extern fn gpiod_line_settings_get_debounce_period_us(settings: ?*struct_gpiod_line_settings) c_ulong;
+pub extern fn gpiod_line_settings_set_event_clock(settings: ?*struct_gpiod_line_settings, event_clock: enum_gpiod_line_clock) c_int;
+pub extern fn gpiod_line_settings_get_event_clock(settings: ?*struct_gpiod_line_settings) enum_gpiod_line_clock;
+pub extern fn gpiod_line_settings_set_output_value(settings: ?*struct_gpiod_line_settings, value: enum_gpiod_line_value) c_int;
+pub extern fn gpiod_line_settings_get_output_value(settings: ?*struct_gpiod_line_settings) enum_gpiod_line_value;
+pub extern fn gpiod_line_config_new() ?*struct_gpiod_line_config;
+pub extern fn gpiod_line_config_free(config: ?*struct_gpiod_line_config) void;
+pub extern fn gpiod_line_config_reset(config: ?*struct_gpiod_line_config) void;
+pub extern fn gpiod_line_config_add_line_settings(config: ?*struct_gpiod_line_config, offsets: [*c]const c_uint, num_offsets: usize, settings: ?*struct_gpiod_line_settings) c_int;
+pub extern fn gpiod_line_config_get_line_settings(config: ?*struct_gpiod_line_config, offset: c_uint) ?*struct_gpiod_line_settings;
+pub extern fn gpiod_line_config_set_output_values(config: ?*struct_gpiod_line_config, values: [*c]const enum_gpiod_line_value, num_values: usize) c_int;
+pub extern fn gpiod_line_config_get_num_configured_offsets(config: ?*struct_gpiod_line_config) usize;
+pub extern fn gpiod_line_config_get_configured_offsets(config: ?*struct_gpiod_line_config, offsets: [*c]c_uint, max_offsets: usize) usize;
+pub extern fn gpiod_request_config_new() ?*struct_gpiod_request_config;
+pub extern fn gpiod_request_config_free(config: ?*struct_gpiod_request_config) void;
+pub extern fn gpiod_request_config_set_consumer(config: ?*struct_gpiod_request_config, consumer: [*c]const u8) void;
+pub extern fn gpiod_request_config_get_consumer(config: ?*struct_gpiod_request_config) [*c]const u8;
+pub extern fn gpiod_request_config_set_event_buffer_size(config: ?*struct_gpiod_request_config, event_buffer_size: usize) void;
+pub extern fn gpiod_request_config_get_event_buffer_size(config: ?*struct_gpiod_request_config) usize;
+pub extern fn gpiod_line_request_release(request: ?*struct_gpiod_line_request) void;
+pub extern fn gpiod_line_request_get_chip_name(request: ?*struct_gpiod_line_request) [*c]const u8;
+pub extern fn gpiod_line_request_get_num_requested_lines(request: ?*struct_gpiod_line_request) usize;
+pub extern fn gpiod_line_request_get_requested_offsets(request: ?*struct_gpiod_line_request, offsets: [*c]c_uint, max_offsets: usize) usize;
+pub extern fn gpiod_line_request_get_value(request: ?*struct_gpiod_line_request, offset: c_uint) enum_gpiod_line_value;
+pub extern fn gpiod_line_request_get_values_subset(request: ?*struct_gpiod_line_request, num_values: usize, offsets: [*c]const c_uint, values: [*c]enum_gpiod_line_value) c_int;
+pub extern fn gpiod_line_request_get_values(request: ?*struct_gpiod_line_request, values: [*c]enum_gpiod_line_value) c_int;
+pub extern fn gpiod_line_request_set_value(request: ?*struct_gpiod_line_request, offset: c_uint, value: enum_gpiod_line_value) c_int;
+pub extern fn gpiod_line_request_set_values_subset(request: ?*struct_gpiod_line_request, num_values: usize, offsets: [*c]const c_uint, values: [*c]const enum_gpiod_line_value) c_int;
+pub extern fn gpiod_line_request_set_values(request: ?*struct_gpiod_line_request, values: [*c]const enum_gpiod_line_value) c_int;
+pub extern fn gpiod_line_request_reconfigure_lines(request: ?*struct_gpiod_line_request, config: ?*struct_gpiod_line_config) c_int;
+pub extern fn gpiod_line_request_get_fd(request: ?*struct_gpiod_line_request) c_int;
+pub extern fn gpiod_line_request_wait_edge_events(request: ?*struct_gpiod_line_request, timeout_ns: i64) c_int;
+pub extern fn gpiod_line_request_read_edge_events(request: ?*struct_gpiod_line_request, buffer: ?*struct_gpiod_edge_event_buffer, max_events: usize) c_int;
+pub const GPIOD_EDGE_EVENT_RISING_EDGE: c_int = 1;
+pub const GPIOD_EDGE_EVENT_FALLING_EDGE: c_int = 2;
+pub const enum_gpiod_edge_event_type = c_uint;
+pub extern fn gpiod_edge_event_free(event: ?*struct_gpiod_edge_event) void;
+pub extern fn gpiod_edge_event_copy(event: ?*struct_gpiod_edge_event) ?*struct_gpiod_edge_event;
+pub extern fn gpiod_edge_event_get_event_type(event: ?*struct_gpiod_edge_event) enum_gpiod_edge_event_type;
+pub extern fn gpiod_edge_event_get_timestamp_ns(event: ?*struct_gpiod_edge_event) u64;
+pub extern fn gpiod_edge_event_get_line_offset(event: ?*struct_gpiod_edge_event) c_uint;
+pub extern fn gpiod_edge_event_get_global_seqno(event: ?*struct_gpiod_edge_event) c_ulong;
+pub extern fn gpiod_edge_event_get_line_seqno(event: ?*struct_gpiod_edge_event) c_ulong;
+pub extern fn gpiod_edge_event_buffer_new(capacity: usize) ?*struct_gpiod_edge_event_buffer;
+pub extern fn gpiod_edge_event_buffer_get_capacity(buffer: ?*struct_gpiod_edge_event_buffer) usize;
+pub extern fn gpiod_edge_event_buffer_free(buffer: ?*struct_gpiod_edge_event_buffer) void;
+pub extern fn gpiod_edge_event_buffer_get_event(buffer: ?*struct_gpiod_edge_event_buffer, index: c_ulong) ?*struct_gpiod_edge_event;
+pub extern fn gpiod_edge_event_buffer_get_num_events(buffer: ?*struct_gpiod_edge_event_buffer) usize;
+pub extern fn gpiod_is_gpiochip_device(path: [*c]const u8) bool;
+pub extern fn gpiod_api_version() [*c]const u8;
+
+
+// TODO: use these
+pub const GpiodLineDirection = enum(c_int) {
+    AS_IS = 1,
+    INPUT = 2,
+    OUTPUT = 3,
 };
-pub extern fn gpiod_line_request(line: ?*struct_gpiod_line, config: [*c]const struct_gpiod_line_request_config, default_val: c_int) c_int;
-pub extern fn gpiod_line_request_input(line: ?*struct_gpiod_line, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_output(line: ?*struct_gpiod_line, consumer: [*c]const u8, default_val: c_int) c_int;
-pub extern fn gpiod_line_request_rising_edge_events(line: ?*struct_gpiod_line, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_falling_edge_events(line: ?*struct_gpiod_line, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_both_edges_events(line: ?*struct_gpiod_line, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_input_flags(line: ?*struct_gpiod_line, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_request_output_flags(line: ?*struct_gpiod_line, consumer: [*c]const u8, flags: c_int, default_val: c_int) c_int;
-pub extern fn gpiod_line_request_rising_edge_events_flags(line: ?*struct_gpiod_line, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_request_falling_edge_events_flags(line: ?*struct_gpiod_line, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_request_both_edges_events_flags(line: ?*struct_gpiod_line, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_request_bulk(bulk: [*c]struct_gpiod_line_bulk, config: [*c]const struct_gpiod_line_request_config, default_vals: [*c]const c_int) c_int;
-pub extern fn gpiod_line_request_bulk_input(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_bulk_output(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8, default_vals: [*c]const c_int) c_int;
-pub extern fn gpiod_line_request_bulk_rising_edge_events(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_bulk_falling_edge_events(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_bulk_both_edges_events(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8) c_int;
-pub extern fn gpiod_line_request_bulk_input_flags(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_request_bulk_output_flags(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8, flags: c_int, default_vals: [*c]const c_int) c_int;
-pub extern fn gpiod_line_request_bulk_rising_edge_events_flags(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_request_bulk_falling_edge_events_flags(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_request_bulk_both_edges_events_flags(bulk: [*c]struct_gpiod_line_bulk, consumer: [*c]const u8, flags: c_int) c_int;
-pub extern fn gpiod_line_release(line: ?*struct_gpiod_line) void;
-pub extern fn gpiod_line_release_bulk(bulk: [*c]struct_gpiod_line_bulk) void;
-pub extern fn gpiod_line_is_requested(line: ?*struct_gpiod_line) bool;
-pub extern fn gpiod_line_is_free(line: ?*struct_gpiod_line) bool;
-pub extern fn gpiod_line_get_value(line: ?*struct_gpiod_line) c_int;
-pub extern fn gpiod_line_get_value_bulk(bulk: [*c]struct_gpiod_line_bulk, values: [*c]c_int) c_int;
-pub extern fn gpiod_line_set_value(line: ?*struct_gpiod_line, value: c_int) c_int;
-pub extern fn gpiod_line_set_value_bulk(bulk: [*c]struct_gpiod_line_bulk, values: [*c]const c_int) c_int;
-pub extern fn gpiod_line_set_config(line: ?*struct_gpiod_line, direction: c_int, flags: c_int, value: c_int) c_int;
-pub extern fn gpiod_line_set_config_bulk(bulk: [*c]struct_gpiod_line_bulk, direction: c_int, flags: c_int, values: [*c]const c_int) c_int;
-pub extern fn gpiod_line_set_flags(line: ?*struct_gpiod_line, flags: c_int) c_int;
-pub extern fn gpiod_line_set_flags_bulk(bulk: [*c]struct_gpiod_line_bulk, flags: c_int) c_int;
-pub extern fn gpiod_line_set_direction_input(line: ?*struct_gpiod_line) c_int;
-pub extern fn gpiod_line_set_direction_input_bulk(bulk: [*c]struct_gpiod_line_bulk) c_int;
-pub extern fn gpiod_line_set_direction_output(line: ?*struct_gpiod_line, value: c_int) c_int;
-pub extern fn gpiod_line_set_direction_output_bulk(bulk: [*c]struct_gpiod_line_bulk, values: [*c]const c_int) c_int;
-pub const GPIOD_LINE_EVENT_RISING_EDGE: c_int = 1;
-pub const GPIOD_LINE_EVENT_FALLING_EDGE: c_int = 2;
-pub const struct_gpiod_line_event = extern struct {
-    ts: struct_timespec,
-    event_type: c_int,
+
+pub const GpiodLineBias = enum(c_int) {
+    AS_IS = 1,
+    DISABLED = 2,
+    PULL_UP = 3,
+    PULL_DOWN = 4,
 };
-pub extern fn gpiod_line_event_wait(line: ?*struct_gpiod_line, timeout: [*c]const struct_timespec) c_int;
-pub extern fn gpiod_line_event_wait_bulk(bulk: [*c]struct_gpiod_line_bulk, timeout: [*c]const struct_timespec, event_bulk: [*c]struct_gpiod_line_bulk) c_int;
-pub extern fn gpiod_line_event_read(line: ?*struct_gpiod_line, event: [*c]struct_gpiod_line_event) c_int;
-pub extern fn gpiod_line_event_read_multiple(line: ?*struct_gpiod_line, events: [*c]struct_gpiod_line_event, num_events: c_uint) c_int;
-pub extern fn gpiod_line_event_get_fd(line: ?*struct_gpiod_line) c_int;
-pub extern fn gpiod_line_event_read_fd(fd: c_int, event: [*c]struct_gpiod_line_event) c_int;
-pub extern fn gpiod_line_event_read_fd_multiple(fd: c_int, events: [*c]struct_gpiod_line_event, num_events: c_uint) c_int;
-pub extern fn gpiod_line_get(device: [*c]const u8, offset: c_uint) ?*struct_gpiod_line;
-pub extern fn gpiod_line_find(name: [*c]const u8) ?*struct_gpiod_line;
-pub extern fn gpiod_line_close_chip(line: ?*struct_gpiod_line) void;
-pub extern fn gpiod_line_get_chip(line: ?*struct_gpiod_line) ?*struct_gpiod_chip;
-pub extern fn gpiod_chip_iter_new() ?*struct_gpiod_chip_iter;
-pub extern fn gpiod_chip_iter_free(iter: ?*struct_gpiod_chip_iter) void;
-pub extern fn gpiod_chip_iter_free_noclose(iter: ?*struct_gpiod_chip_iter) void;
-pub extern fn gpiod_chip_iter_next(iter: ?*struct_gpiod_chip_iter) ?*struct_gpiod_chip;
-pub extern fn gpiod_chip_iter_next_noclose(iter: ?*struct_gpiod_chip_iter) ?*struct_gpiod_chip;
-pub extern fn gpiod_line_iter_new(chip: ?*struct_gpiod_chip) ?*struct_gpiod_line_iter;
-pub extern fn gpiod_line_iter_free(iter: ?*struct_gpiod_line_iter) void;
-pub extern fn gpiod_line_iter_next(iter: ?*struct_gpiod_line_iter) ?*struct_gpiod_line;
-pub extern fn gpiod_version_string() [*c]const u8;
-pub const GPIOD_API = @compileError("unable to translate macro: undefined identifier `__attribute__`"); // /usr/include/gpiod.h:62:9
-pub const GPIOD_UNUSED = @compileError("unable to translate macro: undefined identifier `__attribute__`"); // /usr/include/gpiod.h:67:9
-pub const GPIOD_DEPRECATED = @compileError("unable to translate macro: undefined identifier `__attribute__`"); // /usr/include/gpiod.h:79:9
-pub const GPIOD_LINE_BULK_INITIALIZER = @compileError("unable to translate C expr: unexpected token '{'"); // /usr/include/gpiod.h:734:9
-pub const gpiod_line_bulk_foreach_line = @compileError("unable to translate C expr: unexpected token 'for'"); // /usr/include/gpiod.h:788:9
-pub const gpiod_line_bulk_foreach_line_off = @compileError("unable to translate C expr: unexpected token 'for'"); // /usr/include/gpiod.h:806:9
-pub const gpiod_foreach_chip = @compileError("unable to translate C expr: unexpected token 'for'"); // /usr/include/gpiod.h:1697:9
-pub const gpiod_foreach_chip_noclose = @compileError("unable to translate C expr: unexpected token 'for'"); // /usr/include/gpiod.h:1712:9
-pub const gpiod_foreach_line = @compileError("unable to translate C expr: unexpected token 'for'"); // /usr/include/gpiod.h:1747:9
-pub inline fn GPIOD_BIT(nr: anytype) @TypeOf(@as(c_ulong, 1) << nr) {
-    return @as(c_ulong, 1) << nr;
-}
-pub const GPIOD_LINE_BULK_MAX_LINES = @as(c_int, 64);
-pub const gpiod_chip = struct_gpiod_chip;
-pub const gpiod_line = struct_gpiod_line;
-pub const gpiod_chip_iter = struct_gpiod_chip_iter;
-pub const gpiod_line_iter = struct_gpiod_line_iter;
-pub const gpiod_line_bulk = struct_gpiod_line_bulk;
-pub const gpiod_ctxless_event_poll_fd = struct_gpiod_ctxless_event_poll_fd;
-pub const gpiod_line_request_config = struct_gpiod_line_request_config;
-pub const gpiod_line_event = struct_gpiod_line_event;
+
+pub const GpiodLineDrive = enum(c_int) {
+    PUSH_PULL = 1,
+    OPEN_DRAIN = 2,
+    OPEN_SOURCE = 3,
+};
+
+pub const GpiodLineValue = enum(c_int) {
+    INACTIVE = 0,
+    ACTIVE = 1,
+};
+
+pub const GpiodLineClock = enum(c_int) {
+    MONOTONIC = 0,
+    REALTIME = 1,
+};
+
+// Event types for ctxless
+pub const GpiodLineEdge = enum(c_int) {
+    EDGE_NONE = 1,
+    EDGE_RISING = 2,
+    EDGE_FALLING = 3,
+    EDGE_BOTH = 4,
+};
+

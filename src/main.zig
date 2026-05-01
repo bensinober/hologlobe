@@ -5,30 +5,25 @@ const fs = std.fs;
 const posix = std.posix;
 
 // for http server
-const net = std.net;
 const http = std.http;
 const index_html = @embedFile("www/index.html");
 const script_js = @embedFile("www/script.js");
 
 // the rest
 const gpiod = @import("gpiod.zig");
-const ssd1305 = @import("ssd1305.zig");
-//const ws281x = @import("ws281x.zig");
-const ws2811 = @import("ws2811.zig");
+const spi = @import("spi.zig");
 const img = @import("img.zig"); // TODO: use API to upload/convert images instead
 
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const time = std.time;
 
-var display: ssd1305.Display = undefined;
-var spiBus: ssd1305.SpiBus = undefined;
-
 const HALL_PIN = 23; // TODO: add hall sensor
-const LEDSTRIP_COLS = 50; // img width
-const LEDSTRIP_ROWS = 100; //img height
-const LEDSTRIP_PIN_A = 18; // GPIO18 (12)
-const LEDSTRIP_PIN_B = 13; // GPIO13 (33)
+const LEDSTRIP_COLS = 56; // img width (=length of one frame)
+const LEDSTRIP_ROWS = 112; //img height
+const LEDSTRIP_LENGTH = LEDSTRIP_COLS*2;
+//const LEDSTRIP_PIN_A = 18; // GPIO18 (12)
+//const LEDSTRIP_PIN_B = 13; // GPIO13 (33)
 //const LEDSTRIP_PIN = 28; // =18 = GPIO4_D4 = pin 3*8+4 = 28
 
 const BTN_A_PIN = 17; // pin 13 -> GPIO17
@@ -36,7 +31,7 @@ const BTN_A_PIN = 17; // pin 13 -> GPIO17
 const ROT_A_PIN = 5; // pin 29 -> GPIO5
 const ROT_B_PIN = 6; // pin 31 -> GPIO6
 
-// Global LED Mode
+// GLOBALS LED Mode
 pub const LEDMode = enum(u8) {
     IDLE,
     CALIBRATE,
@@ -53,48 +48,60 @@ pub const LEDMode = enum(u8) {
     }
 };
 
+const ControlError = error{
+    GpioChipFail,
+};
+
+// APA102 Specific
+const brightness = 1;
+//const APA102_START = (brightness & 0b00011111) | 0b11100000;
+const APA102_START = 0xe0 | brightness;
+
+var spiBus: spi.Bus = undefined;
+
 // initial mode
 var ledMode = LEDMode.IDLE;
 var lastLedMode = LEDMode.IDLE;
 
 pub const Server = struct {
     allocator: Allocator,
-    listener: std.net.Server,
-    controller: Control,
+    io: std.Io,
+    listener: std.Io.net.Server,
     ledController: *LedControl,
     // Add other fields as needed, e.g., for routing, database connections, etc.
 
-    pub fn init(allocator: std.mem.Allocator, port: u16, controller: Control, ledController: *LedControl) !Server {
-        const address = try std.net.Address.parseIp("0.0.0.0", port);
-        const listener = try address.listen(.{ .reuse_address = true });
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, port: u16, ledController: *LedControl) !Server {
+        const address = try std.Io.net.IpAddress.parse("0.0.0.0", port);
+        const listener = try address.listen(io, .{ .reuse_address = true });
         std.debug.print("Listening on {d}\n", .{port});
 
         return Server{
             .allocator = allocator,
+            .io = io,
             .listener = listener,
-            .controller = controller,
             .ledController = ledController,
         };
     }
 
     pub fn deinit(self: *Server) void {
-        self.listener.deinit();
+        self.listener.deinit(self.io);
     }
 
     pub fn serve(self: *Server) !void {
         while (true) {
-            try self.handleConnection(try self.listener.accept());
+            try self.handleConnection(try self.listener.accept(self.io));
         }
     }
 
     // Request handler function (example)
-    pub fn handleConnection(self: *Server, conn: net.Server.Connection) !void {
+    pub fn handleConnection(self: *Server, conn: std.Io.net.Stream) !void {
         //defer conn.stream.close();
-        var recvBuf: [21504]u8 = undefined; // img raw is 50 x 100 x 4 = 20000 bytes
+        var recvBuf: [82984]u8 = undefined; // img raw is 50 x 100 x 4 = 20000 bytes
         var sendBuf: [4096]u8 = undefined;
-        var reader = conn.stream.reader(&recvBuf);
-        var writer = conn.stream.writer(&sendBuf);
-        var httpServer = std.http.Server.init(reader.interface(), &writer.interface);
+        var reader = conn.reader(self.io, &recvBuf);
+        var writer = conn.writer(self.io, &sendBuf);
+
+        var httpServer = std.http.Server.init(&reader.interface, &writer.interface);
         var req = try httpServer.receiveHead();
         std.debug.print("Received request: {any}\n", .{req});
 
@@ -130,10 +137,10 @@ pub const Server = struct {
             });
             // LED CONTROL
         } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/cycleColours")) {
-            self.ledController.cycleColours();
+            try self.ledController.cycleColours();
             try req.respond("CYCLE", .{ .status = .ok, .transfer_encoding = .chunked });
         } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/cycleColumns")) {
-            self.ledController.cycleColumns(0xff0000);
+            try self.ledController.cycleColumns([4]u8{APA102_START, 0, 0, 0xff});
             try req.respond("CYCLE", .{ .status = .ok, .transfer_encoding = .chunked });
         } else if (req.head.method == .GET and std.mem.startsWith(u8, req.head.target, "/setMode")) {
             var paths = std.mem.splitScalar(u8, req.head.target, '/');
@@ -157,7 +164,7 @@ pub const Server = struct {
             if (req.head.content_length) |contLen| {
                 len = @intCast(contLen);
             }
-            const body = try reader.interface().take(len);
+            const body = try reader.interface.take(len);
             std.debug.print("UPLOAD body: {any}\n", .{reader});
             self.ledController.setImg(body) catch |err| {
                 std.debug.print("Error uploading image: {}\n", .{err});
@@ -192,7 +199,7 @@ pub const Server = struct {
         //     try res.sendHeaders();
         //     _ = try res.writer().write("404 Not Found");
         // }
-        conn.stream.close();
+        conn.close(self.io);
     }
 
     fn sendFile(writer: std.io.Writer, filename: []const u8) !void {
@@ -208,72 +215,6 @@ pub const Server = struct {
     }
 };
 
-pub const Control = struct {
-    const Self = @This();
-
-    chip: ?*gpiod.struct_gpiod_chip,
-    led: ?*gpiod.struct_gpiod_line,
-    btnA: ?*gpiod.struct_gpiod_line,
-    rotA: ?*gpiod.struct_gpiod_line,
-    rotB: ?*gpiod.struct_gpiod_line,
-
-    pub fn init(chip: ?*gpiod.struct_gpiod_chip) Self {
-        // led
-        const ledLine = gpiod.gpiod_chip_get_line(chip, HALL_PIN); // gpiod_chip_get_lines for bulk
-        const baLine = gpiod.gpiod_chip_get_line(chip, BTN_A_PIN);
-        const raLine = gpiod.gpiod_chip_get_line(chip, ROT_A_PIN);
-        const rbLine = gpiod.gpiod_chip_get_line(chip, ROT_B_PIN);
-        _ = gpiod.gpiod_line_request_output(ledLine, "ledblink", 0);
-        const buttonConfig = &gpiod.gpiod_line_request_config{
-            .consumer = "hologlobe",
-            .request_type = gpiod.GPIOD_LINE_REQUEST_DIRECTION_INPUT,
-            .flags = gpiod.GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP,
-        };
-        _ = gpiod.gpiod_line_request(baLine, buttonConfig, 1);
-        //_ = gpiod.gpiod_line_request_falling_edge_events(baLine, "buttons");
-        _ = gpiod.gpiod_line_request_input(raLine, "rota");
-        _ = gpiod.gpiod_line_request_input(rbLine, "rotb");
-        return Self{
-            .chip = chip,
-            .led = ledLine,
-            .btnA = baLine,
-            .rotA = raLine,
-            .rotB = rbLine,
-        };
-    }
-    pub fn deinit(self: Self) void {
-        _ = gpiod.gpiod_line_release(self.led);
-    }
-
-    pub fn led_blink(self: Self) void {
-        std.debug.print("blinking led\n", .{});
-        _ = gpiod.gpiod_line_set_value(self.led, 1);
-        std.Thread.sleep(200 * 1000 * 1000); // 200ms
-        _ = gpiod.gpiod_line_set_value(self.led, 0);
-    }
-
-    // TOOD: bulk register buttons and listen for falling edge
-    pub fn pollButtonEvents(self: *Self) !void {
-        var press: u3 = 0;
-        const ba = gpiod.gpiod_line_get_value(self.btnA);
-        if (ba == 0) {
-            press = 1;
-        }
-        if (press > 0) {
-            self.led_blink();
-
-            switch (press) {
-                1 => {
-                    //try synth.selectPrevSoundFont();
-                },
-                else => {
-                    std.debug.print("Unknown button\n", .{});
-                },
-            }
-        }
-    }
-};
-
 const ImageMat = struct {
     mat: [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8,
 };
@@ -281,24 +222,29 @@ const ImageMat = struct {
 pub const LedControl = struct {
     const Self = @This();
 
-    ptr: [*c]ws2811.ws2811_t,
+    spiBus: *spi.Bus,
+    io: std.Io,
     calibrationMatrix: ImageMat,
     imgMatrix: ImageMat,
+    frameBuf: [LEDSTRIP_LENGTH][4]u8,
     allocator: Allocator,
-    mutex: std.Thread.Mutex,
+    mutex: std.Io.Mutex,
 
-    pub fn init(allocator: Allocator, ledstrip: [*c]ws2811.ws2811_t) !Self {
+    pub fn init(allocator: Allocator, io: std.Io, sb: *spi.Bus) !Self {
+        const frameBuf: [LEDSTRIP_LENGTH][4]u8 = undefined;
         return Self{
-            .ptr = ledstrip,
+            .spiBus = sb,
+            .io = io,
             .calibrationMatrix = undefined,
             .imgMatrix = undefined,
+            .frameBuf = frameBuf,
             .allocator = allocator,
-            .mutex = std.Thread.Mutex{},
+            .mutex = std.Io.Mutex.init,
         };
     }
     pub fn deinit(self: *Self) void {
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-            defer ws2811.ws2811_fini(self.ptr);
+            defer self.spiBus.deinit();
         }
     }
     pub fn clearBuffer(_: *Self) void {
@@ -306,16 +252,16 @@ pub const LedControl = struct {
     }
 
     pub fn setInitialImg(self: *Self) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        try self.mutex.lock(self.io);
+        defer self.mutex.unlock(self.io);
         const mat = try imgbytes2matrix(&img.DATA);
         const imageMat: ImageMat = .{ .mat = mat };
         self.calibrationMatrix = imageMat;
     }
 
     pub fn setImg(self: *Self, imageBytes: []u8) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        try self.mutex.lock(self.io);
+        defer self.mutex.unlock(self.io);
         //const copy = try self.allocator.alloc(u8, imageBytes.len);
         //@memcpy(copy[0..], imageBytes);
         const mat = try imgbytes2matrix(imageBytes);
@@ -323,134 +269,171 @@ pub const LedControl = struct {
         self.imgMatrix = imageMat;
         std.debug.print("mat: {any}\n", .{mat});
     }
-    // convert pixel to u32 and insert in led channel
+
     // rgba -> agrb
-    // pixel is rgba, strip is grb big endian (ws2811 lib does not handle conversion to grb)
-    pub fn setPixel(self: *Self, chan: usize, ledIdx: usize, colour: [4]u8) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        // Big endian + swap red and green
-        const value: u32 = (@as(u32, colour[3]) << 24) | (@as(u32, colour[1]) << 16) | (@as(u32, colour[0]) << 8) | @as(u32, colour[2]);
-        //const value: u32 = (@as(u32, 0) << 24) | (@as(u32, colour[1]) << 16) | (@as(u32, colour[0]) << 8) | @as(u32, colour[2]);
-        //const value: u32 = std.mem.readPackedInt(u32, colour[0..4], 0, .big);
-        //std.debug.print("colour: {x}, bigend: 0x{x:0>8}, 0x{x:0>8}\n", .{ colour, val1, val2 });
-        if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-            self.ptr.*.channel[chan].leds[ledIdx] = value;
-        } else {
-            std.debug.print("colour: {x}, chan: {d}, ledIdx: {d}, bigend: 0x{x:0>8}\n", .{ colour, chan, ledIdx, value });
-        }
+    // pixel is rgba, strip is agrb big endian
+    pub fn setPixel(self: *Self, ledIdx: usize, colour: [4]u8) !void {
+        try self.mutex.lock(self.io);
+        defer self.mutex.unlock(self.io);
+        self.frameBuf[ledIdx][0] = APA102_START;
+        self.frameBuf[ledIdx][1] = colour[1];
+        self.frameBuf[ledIdx][2] = colour[2];
+        self.frameBuf[ledIdx][3] = colour[3];
+        //std.debug.print("colour: {x}, ledIdx: {d}\n", .{ colour, ledIdx });
     }
 
     ///////  Testing!
-    pub fn renderFirstRow(self: *Self) void {
+    pub fn renderFirstRow(self: *Self) !void {
         const mat = self.imgMatrix;
         std.debug.print("row 0: {any}\n", .{mat.mat[0]});
         for (0..LEDSTRIP_COLS) |col| {
             const colour = mat.mat[0][col];
-            self.setPixel(0, col, colour);
-            self.setPixel(1, col, colour);
+            try self.setPixel(col, colour);
             std.debug.print("colour: {any}, ledIdx: {d}\n", .{ colour, col });
         }
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-            _ = ws2811.ws2811_render(self.ptr); // show row
+            try self.show();
         }
-        //std.Thread.sleep(325000); // sleep 350us to balance frame rate of 5Hz
+        //try self.io.sleep(std.Io.Duration.fromMicroseconds(350), .real); // sleep 350us to balance frame rate of 5Hz
     }
 
     pub fn runFirstRow(self: *Self) !void {
-        const start = try std.time.Instant.now();
-        self.renderFirstRow();
-        const end = try std.time.Instant.now();
-        std.debug.print("ns spent on first line render: {}\n", .{end.since(start)});
-        std.Thread.sleep(1000 * 1000); // 1ms
-    }
-    ///////  Testing!
+        const start = std.Io.Clock.awake.now(self.io);
+        try self.renderFirstRow();
+        var elapsed = start.untilNow(self.io, .awake);
+        const ns = elapsed.toNanoseconds();
 
-    // render img to two strips, split in half, display in each channel
-    // source image is 50x100 24bit, rotated and
-    pub fn renderImg(self: *Self) void {
+        std.debug.print("ns spent on first line render: {}\n", .{ns});
+        try self.io.sleep(std.Io.Duration.fromMilliseconds(1), .real);
+    }
+
+    ///////  Testing!
+    // render img row by row, split in half, reverse second half, as strip is one piece continuing over middle
+    // source image is 60x120 24bit
+    pub fn renderImg(self: *Self) !void {
         const mat = self.imgMatrix;
         const half = LEDSTRIP_ROWS / 2; // split rows in two, one for each strip
         for (0..half) |i| {
+            // HERE!
             for (0..LEDSTRIP_COLS) |j| {
-                self.setPixel(0, j, mat.mat[i][j]);
-                self.setPixel(1, j, mat.mat[i + half][j]);
+                try self.setPixel(j, mat.mat[i][j]);
+                const backPixel = mat.mat[i + half][LEDSTRIP_COLS - 1 - j]; // reversed
+                try self.setPixel(LEDSTRIP_COLS + j, backPixel);
             }
             if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-                _ = ws2811.ws2811_render(self.ptr); // show row
+               try self.show();
+               // _ = ws2811.ws2811_render(self.ptr); // show row
             }
-            //std.Thread.sleep(325000); // sleep 350us to balance frame rate of 5Hz
+            //try self.io.sleep(std.Io.Duration.fromMicroseconds(350), .real); // sleep 350us to balance frame rate of 5Hz
         }
     }
 
-    pub fn renderCalibration(self: *Self) void {
+    // render interlaced, 100x200 split i half, alternating abab
+    // pub fn renderImg(self: *Self) void {
+    //     const mat = self.imgMatrix;
+    //     const half = LEDSTRIP_ROWS / 2; // split rows in two, one for each strip
+    //     for (0..half) |i| {
+    //         for (0..LEDSTRIP_COLS) |j| {
+    //             const ledIdx: usize = @divFloor(j, 2);
+    //             if (i % 2 == 0) {
+    //                 if (j % 2 == 0) {
+    //                     self.setPixel(0, ledIdx, mat.mat[i][j]);
+    //                 } else {
+    //                     self.setPixel(1, ledIdx, mat.mat[i + half][j]);
+    //                 }
+    //             } else {
+    //                 if (j % 2 == 0) {
+    //                     self.setPixel(1, ledIdx, mat.mat[i][j]);
+    //                 } else {
+    //                     self.setPixel(0, ledIdx, mat.mat[i + half][j]);
+    //                 }
+    //             }
+    //         }
+    //         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
+    //             _ = ws2811.ws2811_render(self.ptr); // show row
+    //         }
+    //         //try self.io.sleep(std.Io.Duration.fromMicroseconds(350), .real); // sleep 350us to balance frame rate of 5Hz
+    //     }
+    // }
+
+    pub fn renderCalibration(self: *Self) !void {
         const mat = self.calibrationMatrix;
         const half = LEDSTRIP_ROWS / 2; // split rows in two, one for each strip
         for (0..half) |i| {
             for (0..LEDSTRIP_COLS) |j| {
-                self.setPixel(0, j, mat.mat[i][j]);
-                self.setPixel(1, j, mat.mat[i + half][j]);
+                try self.setPixel(j, mat.mat[i][j]);
+                const backPixel = mat.mat[i + half][LEDSTRIP_COLS - 1 - j]; // reversed
+                try self.setPixel(LEDSTRIP_COLS + j, backPixel);
             }
             if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-                _ = ws2811.ws2811_render(self.ptr); // show row
+                try self.show();
+                //_ = ws2811.ws2811_render(self.ptr); // show row
             }
-            //std.Thread.sleep(325000); // sleep 350us to balance frame rate of 5Hz
+            //try self.io.sleep(std.Io.Duration.fromMicroseconds(350), .real); // sleep 350us to balance frame rate of 5Hz
         }
     }
 
-    pub fn lightAllLeds(self: *Self, col: u32) void {
+    pub fn lightAllLeds(self: *Self, col: [4]u8) !void {
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
             var i: usize = 0;
-            var j: usize = 0;
-            while (i < LEDSTRIP_COLS) : (i += 1) {
-                self.ptr.*.channel[0].leds[i] = col;
+            while (i < LEDSTRIP_LENGTH) : (i += 1) {
+                //self.setPixel(i, col);
+                self.frameBuf[i] = col;
             }
-            while (j < LEDSTRIP_COLS) : (j += 1) {
-                self.ptr.*.channel[1].leds[j] = col;
-            }
-            _ = ws2811.ws2811_render(self.ptr);
+            try self.show();
         }
     }
 
     // Startup, blink red, green and blue
-    pub fn cycleColours(self: *Self) void {
-        var timer = std.time.Timer.start() catch |err| {
-            std.debug.print("err: {any}\n", .{err});
-            return;
-        };
-        self.lightAllLeds(0xff0000);
-        std.debug.print("ns spent on green cycle: {}\n", .{timer.lap()});
-        std.Thread.sleep(500 * 1000 * 1000);
-        timer.reset();
-        self.lightAllLeds(0x00ff00);
-        std.debug.print("ns spent on red cycle: {}\n", .{timer.lap()});
-        std.Thread.sleep(500 * 1000 * 1000);
-        timer.reset();
-        self.lightAllLeds(0x0000ff);
-        std.debug.print("ns spent on blue cycle: {}\n", .{timer.lap()});
-        std.Thread.sleep(500 * 1000 * 1000);
-        self.lightAllLeds(0x000000);
-        std.Thread.sleep(1000 * 1000 * 1000);
+    pub fn cycleColours(self: *Self) !void {
+        var start: std.Io.Timestamp = undefined;
+
+        start = std.Io.Clock.awake.now(self.io);
+        try self.lightAllLeds([4]u8{APA102_START, 0xff, 0, 0});
+        var elapsed = start.untilNow(self.io, .awake);
+        var ns = elapsed.toNanoseconds();
+        std.debug.print("ns spent on green cycle: {}\n", .{ns});
+
+        try self.io.sleep(std.Io.Duration.fromMilliseconds(500), .real);
+
+        start = std.Io.Clock.awake.now(self.io);
+        try self.lightAllLeds([4]u8{APA102_START, 0, 0xff, 0});
+        elapsed = start.untilNow(self.io, .awake);
+        ns = elapsed.toNanoseconds();
+        std.debug.print("ns spent on red cycle: {}\n", .{ns});
+
+        try self.io.sleep(std.Io.Duration.fromMilliseconds(500), .real);
+
+        start = std.Io.Clock.awake.now(self.io);
+        try self.lightAllLeds([4]u8{APA102_START, 0, 0, 0xff});
+        elapsed = start.untilNow(self.io, .awake);
+        ns = elapsed.toNanoseconds();
+        std.debug.print("ns spent on blue cycle: {}\n", .{ns});
+
+        try self.io.sleep(std.Io.Duration.fromMilliseconds(500), .real);
+
+        try self.lightAllLeds([4]u8{APA102_START, 0, 0, 0});
+
+        try self.io.sleep(std.Io.Duration.fromMilliseconds(1000), .real);
     }
 
     pub fn runOnce(self: *Self) !void {
         const start = try std.time.Instant.now();
-        self.renderImg();
+        try self.renderImg();
         const end = try std.time.Instant.now();
         std.debug.print("ns spent on full render: {}\n", .{end.since(start)});
-        std.Thread.sleep(1000 * 1000); // 1ms
+        try self.io.sleep(std.Io.Duration.fromMilliseconds(1), .real);
     }
 
-    pub fn cycleColumns(self: *Self, col: u32) void {
+    pub fn cycleColumns(self: *Self, col: [4]u8) !void {
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-            for (0..LEDSTRIP_COLS) |x| {
-                self.ptr.*.channel[0].leds[x] = col;
-                self.ptr.*.channel[1].leds[x] = col;
-                _ = ws2811.ws2811_render(self.ptr); // show row
-                std.Thread.sleep(10 * 1000 * 1000);
-                self.ptr.*.channel[0].leds[x] = 0;
-                self.ptr.*.channel[1].leds[x] = 0;
-                _ = ws2811.ws2811_render(self.ptr); // show row
+            for (0..LEDSTRIP_LENGTH) |x| {
+                // TODO
+                self.frameBuf[x] = col;
+                try self.show();
+                try self.io.sleep(std.Io.Duration.fromMilliseconds(10), .real);
+                self.frameBuf[x] = [4]u8{APA102_START, 0, 0, 0};
+                try self.show();
             }
         }
     }
@@ -466,23 +449,24 @@ pub const LedControl = struct {
         while (true) {
             switch (ledMode) {
                 .IDLE => {
-                    std.Thread.sleep(1000 * 1000); // to ease cpu
+                    try self.io.sleep(std.Io.Duration.fromMilliseconds(1), .real); // to ease cpu
                 },
                 .CALIBRATE => {
-                    self.renderCalibration();
+                    try self.renderCalibration();
                 },
                 .DRAW => {
-                    std.Thread.sleep(1000 * 1000); // to ease cpu
+                    try self.io.sleep(std.Io.Duration.fromMilliseconds(1), .real); // to ease cpu
                 },
                 .RUNONCE => {
-                    self.renderImg();
+                    try self.renderImg();
                     ledMode = LEDMode.IDLE;
                 },
                 .ANIMATION => {
-                    const start = try std.time.Instant.now();
-                    self.renderImg();
-                    const end = try std.time.Instant.now();
-                    std.debug.print("ns spent on full render: {}\n", .{end.since(start)});
+                    const start = std.Io.Clock.awake.now(self.io);
+                    try self.renderImg();
+                    var elapsed = start.untilNow(self.io, .awake);
+                    const ns = elapsed.toNanoseconds();
+                    std.debug.print("ns spent on full render: {}\n", .{ns});
                 },
                 else => {
                     std.debug.print("UNKNOWN STATE", .{});
@@ -491,158 +475,101 @@ pub const LedControl = struct {
         }
     }
 
+    // send entire frame
+    pub fn show(self: *Self) !void {
+        //std.debug.print("FRAME: {any}", .{self.frameBuf});
+        // START FRAME
+        try self.sendData(&[4]u8{0,0,0,0});
+        for (0..LEDSTRIP_LENGTH) |col| {
+            try self.sendData(&self.frameBuf[col]);
+        }
+        // END FRAME
+        try self.sendData(&[4]u8{0xff,0xff,0xff,0xff}); // 1-bits * num_leds/2
+    }
+
+
+    pub fn sendData(self: *Self, data: []const u8) !void {
+        _ = try self.spiBus.spiXfer(data[0..], true);
+    }
+
     // transform png data [][4]u8 to led matrix pixel vector (mat[row][col]pixel) [rows][cols][4]u8 prepared for led strip length
     // NB : image data sent over wire starts top left, we need to set pixels in same order
     pub fn imgbytes2matrix(bytes: []const u8) ![LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 {
-        var stream = std.io.fixedBufferStream(bytes);
-        const reader = stream.reader();
+        std.debug.print("BOB:\n", .{});
+        var reader = std.Io.Reader.fixed(bytes);
         var mat: [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 = undefined;
-        var pixel: [4]u8 = undefined; // in bigendian MSB format
-        outer: for (0..LEDSTRIP_ROWS) |row| {
+        var pixel: [4]u8 = undefined; // in littleendian format rgba
+        var newPixel: [4]u8 = undefined; // in bigendian MSB format abgr
+        for (0..LEDSTRIP_ROWS) |row| {
             for (0..LEDSTRIP_COLS) |col| {
-                const bytes_read = try reader.read(pixel[0..]);
-                if (bytes_read == 0) {
-                    break :outer; // no more data
-                }
-                mat[row][col] = pixel;
+                try reader.readSliceAll(pixel[0..]); // read to buffer is full
+                newPixel[0] = APA102_START;
+                newPixel[1] = pixel[2];
+                newPixel[2] = pixel[1];
+                newPixel[3] = pixel[0];
+                mat[row][col] = newPixel;
             }
         }
         return mat;
     }
+
 };
 
 // Get WIFI IP address by fake UDP connection
-pub fn getLocalAddress(alloc: Allocator) ![]const u8 {
-    const addr = try std.net.Address.parseIp("1.1.1.1", 0);
-    const sock = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, posix.IPPROTO.UDP);
-    defer posix.close(sock);
-    try posix.connect(sock, &addr.any, addr.getOsSockLen());
-
-    var address: net.Address = undefined;
-    var len: posix.socklen_t = @sizeOf(net.Address);
-    try posix.getsockname(sock, &address.any, &len);
-    const out = try std.fmt.allocPrint(alloc, "{any}", .{address});
+pub fn getLocalAddress(io: std.Io, alloc: Allocator) ![]const u8 {
+    const local = try std.Io.net.IpAddress.parse("0.0.0.0", 0);
+    const remote = try std.Io.net.IpAddress.parse("1.1.1.1", 0);
+    var socket = try local.bind(io, .{ .mode = .dgram, .protocol = .udp });
+    defer socket.close(io);
+    const conn = try remote.connect(io, .{ .mode = .dgram });
+    const address = conn.socket.address;
+    const out = try std.fmt.allocPrint(alloc, "{f}", .{address});
     return out;
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    // init IO
+    const allocator = init.arena.allocator();
+    const io = init.io;
+    const args = try init.minimal.args.toSlice(allocator);
+
+    for (args) |arg| {
+        std.log.info("Argument: {s}", .{arg});
+    }
     const arch = @import("builtin").target.cpu.arch;
     // Prints to stderr, shortcut based on `std.io.getStdErr()`
     std.debug.print("Testing zig for hologlobe Magic!.\n", .{});
 
-    const addr = try getLocalAddress(allocator);
+    const addr = try getLocalAddress(io, allocator);
     std.debug.print("hologlobe IP addr: {s}\n", .{addr});
 
-    const controlChip = gpiod.gpiod_chip_open_by_name("gpiochip0");
-
-    var ledstrip: ws2811.ws2811_t = undefined;
-    // ws281x
-    // const ledChip = gpiod.gpiod_chip_open_by_name("gpiochip4");
-    // var ledCtrl = ws281x.WS281x.init(ledChip, LEDSTRIP_PINA);
-    // defer ledCtrl.deinit();
-    // ledCtrl.showColor(0xff, 0xff, 0xa0);
-    // ledCtrl.sendReset();
-
-    // ws2811 init
+    // SPI INIT
     if (arch != std.Target.Cpu.Arch.x86_64) {
-        ledstrip = ws2811.ws2811_t{
-            .render_wait_time = 0,
-            .device = null,
-            .rpi_hw = null,
-            .freq = 800000,
-            .dmanum = 10,
-            .channel = [2]ws2811.ws2811_channel_t{
-                ws2811.ws2811_channel_t{
-                    .gpionum = LEDSTRIP_PIN_A,
-                    .invert = 0,
-                    .count = LEDSTRIP_COLS,
-                    .strip_type = ws2811.WS2811_STRIP_RGB,
-                    .leds = null,
-                    .brightness = 50,
-                    .wshift = 0x00,
-                    .rshift = 0x00,
-                    .gshift = 0x00,
-                    .bshift = 0x00,
-                    .gamma = null,
-                },
-                ws2811.ws2811_channel_t{
-                    .gpionum = LEDSTRIP_PIN_B,
-                    .invert = 0,
-                    .count = LEDSTRIP_COLS,
-                    .strip_type = ws2811.WS2811_STRIP_RGB,
-                    .leds = null,
-                    .brightness = 50,
-                    .wshift = 0x00,
-                    .rshift = 0x00,
-                    .gshift = 0x00,
-                    .bshift = 0x00,
-                    .gamma = null,
-                },
-            },
-        };
-        _ = ws2811.ws2811_init(&ledstrip);
-    }
-    // SPI AND DISPLAY INIT
-    if (arch != std.Target.Cpu.Arch.x86_64) {
-        const fd = try fs.openFileAbsolute("/dev/spidev0.0", fs.File.OpenFlags{
-            .mode = .read_write,
-        });
-        defer fd.close();
-        const spiDev = ssd1305.SPIDevice{
-            .fd = fd,
-            .speedHz = 4000000, // 125000000 Hz max, but +7Mhz will probably give blank
-            .csChange = 0,
-            .mode = 0x04, // MODE_3
-            .bpw = 8,
-            .delayUsecs = 0,
+        // GPIO INIT
+        const chp = gpiod.gpiod_chip_open("/dev/gpiochip0");
+        if (chp == null) {
+            std.debug.print("failed opening gpiochip0 for Control!\n", .{});
+            return ControlError.GpioChipFail;
+        }
+        //defer gpiod.gpiod_chip_close(chp);
+        // SPI INIT
+
+        var spiConfig = spi.SpiConfig{
+            .mode = 0,
+            .bits_per_word = 8,
+            .speed = 18000000,
+            .delay = 0,
         };
 
-        // spi, dc, rst, cs
-        spiBus = ssd1305.SpiBus.init(spiDev, 25, 24, 8);
-        std.debug.print("ssd1305 spi bus initiated\n", .{});
-        const config = ssd1305.Config{
-            .Width = 128,
-            .Height = 32,
-            .Rotation = 2, // 180 degrees
-            .VccState = ssd1305.EXTERNALVCC,
-        };
-        display = try ssd1305.Display.init(allocator, config, &spiBus);
+        spiBus = try spi.Bus.init(allocator, &spiConfig, chp, 25, 24);
+        std.debug.print("spi bus initiated\n", .{});
 
-        // Initialize display registry
-        try display.initReg();
-        std.Thread.sleep(200 * 1000 * 1000); // 200ms
-        // Turn on the OLED display
-        display.Command(ssd1305.DISPLAYON);
-        std.debug.print("ssd1305 display initiated!\n", .{});
-
-        // print logo
-        try display.SetBuffer(logoBuffer, buflen);
-        display.Display();
-        std.Thread.sleep(1 * 1000 * 1000 * 1000); // 1s
-
-        // show local ip on display
-        display.ClearDisplay();
-        display.writeLine(addr, 0);
-        display.Display();
-        std.Thread.sleep(2 * 1000 * 1000 * 1000); // 1s
-
-        // start
-        display.ClearDisplay();
-        display.writeLine(" HOLOGLOBE ", 0);
-        display.Display();
-
-        // we need to hold GPIO and Display allocated until exit
-        defer spiBus.deinit();
-        defer display.deinit();
     }
 
-    var controller = Control.init(controlChip);
-    defer controller.deinit();
+    // we need to hold GPIO and Display allocated until exit
+    defer spiBus.deinit();
 
-    var ledController = try LedControl.init(allocator, &ledstrip);
+    var ledController = try LedControl.init(allocator, io, &spiBus);
     try ledController.setInitialImg();
     defer ledController.deinit();
 
@@ -650,47 +577,8 @@ pub fn main() !void {
     const ledThread = try std.Thread.spawn(.{}, LedControl.runMatrix, .{&ledController});
     ledThread.detach();
 
-    var server = try Server.init(allocator, 8765, controller, &ledController);
+    var server = try Server.init(allocator, io, 8765, &ledController);
     defer server.deinit();
 
     try server.serve();
 }
-
-const SSD1305_LCDHEIGHT = 32;
-const SSD1305_LCDWIDTH = 128;
-const buflen = SSD1305_LCDHEIGHT * SSD1305_LCDWIDTH / 8;
-var logoBuffer: [buflen]u8 = [buflen]u8{
-    // 'paels-128x32', 128x32px (16 x 32 bytes x 8 bits)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x40, 0xa0, 0xa0, 0xd0, 0x10, 0x70, 0x40, 0x30, 0xa0, 0x20, 0xc0, 0x90, 0xb0, 0x60,
-    0x20, 0x60, 0x60, 0xa0, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xe0, 0xb0, 0x20, 0x10, 0x10,
-    0x20, 0x40, 0x50, 0x70, 0xd0, 0xc0, 0x90, 0x90, 0x20, 0x20, 0x10, 0xd0, 0xd0, 0x00, 0x90, 0xf0,
-    0xe0, 0x20, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x20, 0x60, 0x30, 0x00, 0x60, 0x30, 0xa0, 0xc0, 0xf0,
-    0xb0, 0x60, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x60, 0x20, 0xb0, 0x10, 0xe0,
-    0x60, 0xd0, 0x80, 0xe0, 0x90, 0x60, 0x60, 0xe0, 0x30, 0xe0, 0xe0, 0x60, 0xc0, 0xc0, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x08, 0xcd, 0xb5, 0x98, 0x46, 0x69, 0x89, 0x36, 0x7b, 0x82, 0x40, 0xc0, 0x80, 0x23,
-    0xb5, 0xdc, 0x63, 0x29, 0xd8, 0xf7, 0x24, 0x00, 0x00, 0x00, 0xe8, 0x6b, 0x8b, 0x26, 0x12, 0x19,
-    0x39, 0x23, 0xde, 0x63, 0x21, 0xc1, 0x01, 0xa1, 0xa1, 0x21, 0x01, 0x20, 0xa1, 0xe1, 0x81, 0xc0,
-    0xc1, 0x02, 0x01, 0x00, 0x00, 0x00, 0x80, 0x64, 0x45, 0x89, 0xeb, 0x24, 0xb5, 0x4b, 0xfc, 0xf6,
-    0x1f, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x31, 0x1c, 0xe7, 0xa1, 0x5a, 0x5b,
-    0xcf, 0xdc, 0x30, 0x60, 0xe0, 0xc0, 0xc1, 0xc5, 0xc6, 0x86, 0x05, 0x07, 0x07, 0x03, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x10, 0xf6, 0xf6, 0x89, 0x6e, 0xa9, 0xd1, 0x37, 0xed, 0x73, 0x02, 0x03, 0x03, 0x03,
-    0x02, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0xc0, 0x28, 0x2e, 0x23, 0x48, 0x59, 0x33, 0xf3, 0x07,
-    0x06, 0x03, 0x4f, 0xaa, 0x89, 0x5c, 0xf2, 0x82, 0x42, 0x03, 0x43, 0xc0, 0x83, 0x02, 0x62, 0x83,
-    0xc0, 0x40, 0xc0, 0x80, 0x00, 0x60, 0x4d, 0xb1, 0x3c, 0x89, 0xb0, 0xcf, 0x59, 0x7f, 0xdf, 0x84,
-    0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x00, 0xf0, 0x10, 0x31, 0x81,
-    0xf0, 0xf2, 0x81, 0x83, 0x82, 0x85, 0x05, 0x6d, 0x91, 0x9f, 0xe7, 0xb7, 0xff, 0xde, 0x78, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x02, 0x03, 0x07, 0x03, 0x03, 0x03, 0x07, 0x07, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x03, 0x03, 0x03, 0x02, 0x03, 0x07, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x03, 0x03, 0x02, 0x06, 0x05, 0x05, 0x06, 0x04, 0x04, 0x07, 0x06, 0x04, 0x06,
-    0x04, 0x03, 0x03, 0x00, 0x00, 0x00, 0x03, 0x03, 0x06, 0x06, 0x01, 0x06, 0x02, 0x03, 0x06, 0x02,
-    0x01, 0x03, 0x03, 0x03, 0x06, 0x03, 0x03, 0x07, 0x07, 0x07, 0x00, 0x00, 0x03, 0x02, 0x07, 0x03,
-    0x04, 0x03, 0x03, 0x07, 0x07, 0x06, 0x03, 0x03, 0x03, 0x03, 0x06, 0x03, 0x01, 0x01, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};

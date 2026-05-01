@@ -22,12 +22,11 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
-    exe.linkLibC();
-    exe.linkSystemLibrary("gpiod");
-    exe.linkSystemLibrary("ws2811");
-    exe.addIncludePath(b.path("include"));
+    exe.root_module.addIncludePath(b.path("include"));
+    exe.root_module.linkSystemLibrary("gpiod", .{});
 
     _ = b.installArtifact(exe);
 
@@ -44,45 +43,50 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // target armv7
-    const arm = b.addExecutable(.{
-        .name = "hologlobe-armv7",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = b.resolveTargetQuery(.{
-                .cpu_arch = .arm,
-                .os_tag = .linux,
-                .abi = .gnueabihf,
-            }),
-            .optimize = optimize,
-        }),
-    });
-    arm.linkLibC();
-    arm.linkSystemLibrary("gpiod");
-    arm.addLibraryPath(b.path("lib/armv7"));
-    //arm.linkLibrary("ws2811");
-    arm.addObjectFile(b.path("lib/armv7/libws2811.a"));
-    arm.addIncludePath(b.path("include"));
-    _ = b.installArtifact(arm);
-    //zigcvMod.addCSourceFile(.{ .file = b.path("libs/asyncarray.cpp"), .flags = &[_][]const u8{"-Wall","-Wextra","-std=c++11", "-stdlib=libc++" } });
+    // const arm = b.addExecutable(.{
+    //     .name = "hologlobe-armv7",
+    //     .root_module = b.createModule(.{
+    //         .root_source_file = b.path("src/main.zig"),
+    //         .target = b.resolveTargetQuery(.{
+    //             .cpu_arch = .arm,
+    //             .os_tag = .linux,
+    //             .abi = .gnueabihf,
+    //         }),
+    //         .optimize = optimize,
+    //     }),
+    // });
+    // arm.linkLibC();
+    // arm.linkSystemLibrary("gpiod");
+    // arm.addLibraryPath(b.path("lib/armv7"));
+    // arm.addObjectFile(b.path("lib/armv7/libws2811.a"));
+    // arm.addIncludePath(b.path("include"));
+    // _ = b.installArtifact(arm);
 
     // target aarch64
+    // Create module with spidev c wrapper
+    const aarchMod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = b.resolveTargetQuery(.{
+            .cpu_arch = .aarch64,
+            .os_tag = .linux,
+            .abi = .gnu,
+        }),
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    aarchMod.addCSourceFiles(.{
+        .files = &[_][]const u8{
+        "lib/spidev-wrapper.c",
+    },
+        .flags = &.{},
+    });
     const aarch = b.addExecutable(.{
         .name = "hologlobe-aarch64",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = b.resolveTargetQuery(.{
-                .cpu_arch = .aarch64,
-                .os_tag = .linux,
-                .abi = .gnu,
-            }),
-            .optimize = optimize,
-        }),
+        .root_module = aarchMod,
     });
-    aarch.linkLibC();
-    aarch.linkSystemLibrary("gpiod");
-    aarch.addLibraryPath(b.path("lib/aarch64"));
-    aarch.addObjectFile(b.path("lib/aarch64/libws2811.a"));
-    aarch.addIncludePath(b.path("include"));
+    aarch.root_module.addLibraryPath(b.path("lib/aarch64"));
+    aarch.root_module.addIncludePath(b.path("include"));
+    aarch.root_module.linkSystemLibrary("gpiod", .{});
     _ = b.installArtifact(aarch);
 
     // Creates a step for unit testing.
