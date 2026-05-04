@@ -142,7 +142,7 @@ pub const Bus = struct {
         _ = ioctl(fd.handle, SPI_IOC_WR_MAX_SPEED_HZ, @intFromPtr(&config.speed));
 
         const offsets: [2]u32 = .{ dcPin, rstPin };
-        // std.debug.print("CHIP! {any}\n", .{chp});
+        std.debug.print("CHIP! {any}\n", .{chp});
         const settings = gpiod.gpiod_line_settings_new();
         _ = gpiod.gpiod_line_settings_set_direction(settings, gpiod.GPIOD_LINE_DIRECTION_OUTPUT);
         _ = gpiod.gpiod_line_settings_set_output_value(settings, gpiod.GPIOD_LINE_VALUE_INACTIVE);
@@ -205,7 +205,7 @@ pub const Bus = struct {
         }
     }
     pub fn deinit(self: *Self) void {
-        //_ = gpiod.gpiod_line_request_release(self.lines);
+        _ = gpiod.gpiod_line_request_release(self.lines);
         defer self.fd.close(self.io);
         _ = gpiod.gpiod_chip_close(self.chip);
     }
