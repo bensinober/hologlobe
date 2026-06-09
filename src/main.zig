@@ -202,17 +202,6 @@ pub const Server = struct {
         conn.close(self.io);
     }
 
-    fn sendFile(writer: std.io.Writer, filename: []const u8) !void {
-        const file = try std.fs.cwd().openFile(filename, .{});
-        defer file.close();
-
-        var buffer: [1024]u8 = undefined;
-        while (true) {
-            const read_bytes = try file.read(buffer[0..]);
-            if (read_bytes.len == 0) break;
-            try writer.writeAll(read_bytes);
-        }
-    }
 };
 
 const ImageMat = struct {
