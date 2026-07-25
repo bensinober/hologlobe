@@ -84,9 +84,11 @@ pub fn build(b: *std.Build) void {
         .name = "hologlobe-aarch64",
         .root_module = aarchMod,
     });
+
     aarch.root_module.addLibraryPath(b.path("lib/aarch64"));
     aarch.root_module.addIncludePath(b.path("include"));
     aarch.root_module.linkSystemLibrary("gpiod", .{});
+    aarch.root_module.addObjectFile(b.path("lib/aarch64/libws2811.a"));
     _ = b.installArtifact(aarch);
 
     // Creates a step for unit testing.

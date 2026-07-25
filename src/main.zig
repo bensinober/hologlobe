@@ -11,19 +11,20 @@ const script_js = @embedFile("www/script.js");
 
 // the rest
 const gpiod = @import("gpiod.zig");
+const ws2811 = @import("ws2811.zig");
 const spi = @import("spi.zig");
-const img = @import("img.zig"); // TODO: use API to upload/convert images instead
+const img = @import("img.zig");
 
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const time = std.time;
 
 const HALL_PIN = 23; // TODO: add hall sensor
-const LEDSTRIP_COLS = 56; // img width (=length of one frame)
-const LEDSTRIP_ROWS = 112; //img height
-const LEDSTRIP_LENGTH = LEDSTRIP_COLS*2;
-//const LEDSTRIP_PIN_A = 18; // GPIO18 (12)
-//const LEDSTRIP_PIN_B = 13; // GPIO13 (33)
+const LEDSTRIP_COLS = 50; // img width (=length of one frame, and one strip)
+const LEDSTRIP_ROWS = 100; //img height
+const LEDSTRIP_LENGTH = LEDSTRIP_COLS * 2; // each led strip is two joined * 50
+const LEDSTRIP_PIN_A = 18; // GPIO18 (12)
+const LEDSTRIP_PIN_B = 13; // GPIO13 (33)
 //const LEDSTRIP_PIN = 28; // =18 = GPIO4_D4 = pin 3*8+4 = 28
 
 const BTN_A_PIN = 17; // pin 13 -> GPIO17
@@ -51,11 +52,6 @@ pub const LEDMode = enum(u8) {
 const ControlError = error{
     GpioChipFail,
 };
-
-// APA102 Specific
-const brightness = 1;
-//const APA102_START = (brightness & 0b00011111) | 0b11100000;
-const APA102_START = 0xe0 | brightness;
 
 var spiBus: spi.Bus = undefined;
 
@@ -140,7 +136,7 @@ pub const Server = struct {
             try self.ledController.cycleColours();
             try req.respond("CYCLE", .{ .status = .ok, .transfer_encoding = .chunked });
         } else if (req.head.method == .PUT and std.mem.eql(u8, req.head.target, "/cycleColumns")) {
-            try self.ledController.cycleColumns([4]u8{APA102_START, 0, 0, 0xff});
+            try self.ledController.cycleColumns([4]u8{0, 0xff, 0, 0});
             try req.respond("CYCLE", .{ .status = .ok, .transfer_encoding = .chunked });
         } else if (req.head.method == .GET and std.mem.startsWith(u8, req.head.target, "/setMode")) {
             var paths = std.mem.splitScalar(u8, req.head.target, '/');
@@ -211,18 +207,18 @@ const ImageMat = struct {
 pub const LedControl = struct {
     const Self = @This();
 
-    spiBus: *spi.Bus,
+    ptr: [*c]ws2811.ws2811_t,
     io: std.Io,
     calibrationMatrix: ImageMat,
     imgMatrix: ImageMat,
-    frameBuf: [LEDSTRIP_LENGTH][4]u8,
+    frameBuf: [2][LEDSTRIP_LENGTH][4]u8, // channel 0 + 1
     allocator: Allocator,
     mutex: std.Io.Mutex,
 
-    pub fn init(allocator: Allocator, io: std.Io, sb: *spi.Bus) !Self {
-        const frameBuf: [LEDSTRIP_LENGTH][4]u8 = undefined;
+    pub fn init(allocator: Allocator, io: std.Io, ledstrip: [*c]ws2811.ws2811_t) !Self {
+        const frameBuf: [2][LEDSTRIP_LENGTH][4]u8 = undefined;
         return Self{
-            .spiBus = sb,
+            .ptr = ledstrip,
             .io = io,
             .calibrationMatrix = undefined,
             .imgMatrix = undefined,
@@ -233,7 +229,7 @@ pub const LedControl = struct {
     }
     pub fn deinit(self: *Self) void {
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-            defer self.spiBus.deinit();
+            defer ws2811.ws2811_fini(self.ptr);
         }
     }
     pub fn clearBuffer(_: *Self) void {
@@ -259,15 +255,15 @@ pub const LedControl = struct {
         std.debug.print("mat: {any}\n", .{mat});
     }
 
-    // rgba -> agrb
+    // rgba -> grba
     // pixel is rgba, strip is agrb big endian
-    pub fn setPixel(self: *Self, ledIdx: usize, colour: [4]u8) !void {
+    pub fn setPixel(self: *Self, chan: usize, ledIdx: usize, colour: [4]u8) !void {
         try self.mutex.lock(self.io);
         defer self.mutex.unlock(self.io);
-        self.frameBuf[ledIdx][0] = APA102_START;
-        self.frameBuf[ledIdx][1] = colour[1];
-        self.frameBuf[ledIdx][2] = colour[2];
-        self.frameBuf[ledIdx][3] = colour[3];
+        self.frameBuf[chan][ledIdx][0] = colour[3];
+        self.frameBuf[chan][ledIdx][1] = colour[0];
+        self.frameBuf[chan][ledIdx][2] = colour[1];
+        self.frameBuf[chan][ledIdx][3] = colour[2];
         //std.debug.print("colour: {x}, ledIdx: {d}\n", .{ colour, ledIdx });
     }
 
@@ -275,10 +271,10 @@ pub const LedControl = struct {
     pub fn renderFirstRow(self: *Self) !void {
         const mat = self.imgMatrix;
         std.debug.print("row 0: {any}\n", .{mat.mat[0]});
-        for (0..LEDSTRIP_COLS) |col| {
-            const colour = mat.mat[0][col];
-            try self.setPixel(col, colour);
-            std.debug.print("colour: {any}, ledIdx: {d}\n", .{ colour, col });
+        for (0..LEDSTRIP_COLS) |idx| {
+            const colour = mat.mat[0][idx];
+            try self.setPixel(0, idx, colour);
+            std.debug.print("colour: {any}, ledIdx: {d}\n", .{ colour, idx });
         }
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
             try self.show();
@@ -296,18 +292,23 @@ pub const LedControl = struct {
         try self.io.sleep(std.Io.Duration.fromMilliseconds(1), .real);
     }
 
-    ///////  Testing!
+    // Two strips split in half generated for each frame
     // render img row by row, split in half, reverse second half, as strip is one piece continuing over middle
-    // source image is 60x120 24bit
+    // source image is 50x100 24bit
     pub fn renderImg(self: *Self) !void {
         const mat = self.imgMatrix;
-        const half = LEDSTRIP_ROWS / 2; // split rows in two, one for each strip
-        for (0..half) |i| {
-            // HERE!
+        const half = LEDSTRIP_ROWS / 2;
+        const quarter = LEDSTRIP_ROWS / 4; // split rows in four, two for each strip
+        for (0..quarter) |i| {
             for (0..LEDSTRIP_COLS) |j| {
-                try self.setPixel(j, mat.mat[i][j]);
-                const backPixel = mat.mat[i + half][LEDSTRIP_COLS - 1 - j]; // reversed
-                try self.setPixel(LEDSTRIP_COLS + j, backPixel);
+                // channel 0:
+                try self.setPixel(0, j, mat.mat[i][j]);
+                const backPixelA = mat.mat[i + quarter][LEDSTRIP_COLS - 1 - j]; // reversed
+                try self.setPixel(0, LEDSTRIP_COLS + j, backPixelA);
+                // channel 1:
+                try self.setPixel(1, j, mat.mat[i + half][j]);
+                const backPixelB = mat.mat[i + quarter + half][LEDSTRIP_COLS - 1 - j]; // reversed
+                try self.setPixel(1, LEDSTRIP_COLS + j, backPixelB);
             }
             if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
                try self.show();
@@ -347,27 +348,35 @@ pub const LedControl = struct {
 
     pub fn renderCalibration(self: *Self) !void {
         const mat = self.calibrationMatrix;
-        const half = LEDSTRIP_ROWS / 2; // split rows in two, one for each strip
-        for (0..half) |i| {
+        const half = LEDSTRIP_ROWS / 2;
+        const quarter = LEDSTRIP_ROWS / 4; // split rows in four, two for each strip
+        for (0..quarter) |i| {
             for (0..LEDSTRIP_COLS) |j| {
-                try self.setPixel(j, mat.mat[i][j]);
-                const backPixel = mat.mat[i + half][LEDSTRIP_COLS - 1 - j]; // reversed
-                try self.setPixel(LEDSTRIP_COLS + j, backPixel);
+                // channel 0:
+                try self.setPixel(0, j, mat.mat[i][j]);
+                const backPixelA = mat.mat[i + quarter][LEDSTRIP_COLS - 1 - j]; // reversed
+                try self.setPixel(0, LEDSTRIP_COLS + j, backPixelA);
+                // channel 1:
+                try self.setPixel(1, j, mat.mat[i + half][j]);
+                const backPixelB = mat.mat[i + quarter + half][LEDSTRIP_COLS - 1 - j]; // reversed
+                try self.setPixel(1, LEDSTRIP_COLS + j, backPixelB);
             }
             if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
-                try self.show();
-                //_ = ws2811.ws2811_render(self.ptr); // show row
+               try self.show();
+               // _ = ws2811.ws2811_render(self.ptr); // show row
             }
             //try self.io.sleep(std.Io.Duration.fromMicroseconds(350), .real); // sleep 350us to balance frame rate of 5Hz
         }
     }
 
+    // both channels
     pub fn lightAllLeds(self: *Self, col: [4]u8) !void {
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
             var i: usize = 0;
             while (i < LEDSTRIP_LENGTH) : (i += 1) {
-                //self.setPixel(i, col);
-                self.frameBuf[i] = col;
+                try self.setPixel(0, i, col);
+                try self.setPixel(1, i, col);
+                //self.frameBuf[i] = col;
             }
             try self.show();
         }
@@ -378,30 +387,30 @@ pub const LedControl = struct {
         var start: std.Io.Timestamp = undefined;
 
         start = std.Io.Clock.awake.now(self.io);
-        try self.lightAllLeds([4]u8{APA102_START, 0xff, 0, 0});
+        try self.lightAllLeds([4]u8{0xff, 0, 0, 0});
         var elapsed = start.untilNow(self.io, .awake);
         var ns = elapsed.toNanoseconds();
-        std.debug.print("ns spent on green cycle: {}\n", .{ns});
-
-        try self.io.sleep(std.Io.Duration.fromMilliseconds(500), .real);
-
-        start = std.Io.Clock.awake.now(self.io);
-        try self.lightAllLeds([4]u8{APA102_START, 0, 0xff, 0});
-        elapsed = start.untilNow(self.io, .awake);
-        ns = elapsed.toNanoseconds();
         std.debug.print("ns spent on red cycle: {}\n", .{ns});
 
         try self.io.sleep(std.Io.Duration.fromMilliseconds(500), .real);
 
         start = std.Io.Clock.awake.now(self.io);
-        try self.lightAllLeds([4]u8{APA102_START, 0, 0, 0xff});
+        try self.lightAllLeds([4]u8{0, 0xff, 0, 0});
+        elapsed = start.untilNow(self.io, .awake);
+        ns = elapsed.toNanoseconds();
+        std.debug.print("ns spent on green cycle: {}\n", .{ns});
+
+        try self.io.sleep(std.Io.Duration.fromMilliseconds(500), .real);
+
+        start = std.Io.Clock.awake.now(self.io);
+        try self.lightAllLeds([4]u8{0, 0, 0xff, 0});
         elapsed = start.untilNow(self.io, .awake);
         ns = elapsed.toNanoseconds();
         std.debug.print("ns spent on blue cycle: {}\n", .{ns});
 
         try self.io.sleep(std.Io.Duration.fromMilliseconds(500), .real);
 
-        try self.lightAllLeds([4]u8{APA102_START, 0, 0, 0});
+        try self.lightAllLeds([4]u8{0, 0, 0, 0});
 
         try self.io.sleep(std.Io.Duration.fromMilliseconds(1000), .real);
     }
@@ -417,11 +426,12 @@ pub const LedControl = struct {
     pub fn cycleColumns(self: *Self, col: [4]u8) !void {
         if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
             for (0..LEDSTRIP_LENGTH) |x| {
-                // TODO
-                self.frameBuf[x] = col;
+                try self.setPixel(0, x, col);
+                try self.setPixel(1, x, col);
                 try self.show();
                 try self.io.sleep(std.Io.Duration.fromMilliseconds(10), .real);
-                self.frameBuf[x] = [4]u8{APA102_START, 0, 0, 0};
+                try self.setPixel(0, x, [4]u8{0, 0, 0, 0});
+                try self.setPixel(1, x, [4]u8{0, 0, 0, 0});
                 try self.show();
             }
         }
@@ -467,36 +477,35 @@ pub const LedControl = struct {
     // send entire frame
     pub fn show(self: *Self) !void {
         //std.debug.print("FRAME: {any}", .{self.frameBuf});
-        // START FRAME
-        try self.sendData(&[4]u8{0,0,0,0});
-        for (0..LEDSTRIP_LENGTH) |col| {
-            try self.sendData(&self.frameBuf[col]);
+        try self.mutex.lock(self.io);
+        defer self.mutex.unlock(self.io);
+        for (0..LEDSTRIP_LENGTH) |idx| {
+            const colourA = self.frameBuf[0][idx];
+            const valueA: u32 = (@as(u32, colourA[0]) << 24) | (@as(u32, colourA[1]) << 16) | (@as(u32, colourA[2]) << 8) | @as(u32, colourA[3]);
+            const colourB = self.frameBuf[1][idx];
+            const valueB: u32 = (@as(u32, colourB[0]) << 24) | (@as(u32, colourB[1]) << 16) | (@as(u32, colourB[2]) << 8) | @as(u32, colourB[3]);
+            if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64) {
+              self.ptr.*.channel[0][0].leds[idx] = valueA;
+              self.ptr.*.channel[0][1].leds[idx] = valueB;
+            } else {
+              std.debug.print("colourA: {x}, chan: {d}, ledIdx: {d}, bigend: 0x{x:0>8}\n", .{ colourA, 0, idx, valueA });
+              std.debug.print("colourB: {x}, chan: {d}, ledIdx: {d}, bigend: 0x{x:0>8}\n", .{ colourB, 0, idx, valueB });
+            }
         }
-        // END FRAME
-        try self.sendData(&[4]u8{0xff,0xff,0xff,0xff}); // 1-bits * num_leds/2
+         _ = ws2811.ws2811_render(self.ptr);
     }
 
-
-    pub fn sendData(self: *Self, data: []const u8) !void {
-        _ = try self.spiBus.spiXfer(data[0..], true);
-    }
 
     // transform png data [][4]u8 to led matrix pixel vector (mat[row][col]pixel) [rows][cols][4]u8 prepared for led strip length
     // NB : image data sent over wire starts top left, we need to set pixels in same order
     pub fn imgbytes2matrix(bytes: []const u8) ![LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 {
-        std.debug.print("BOB:\n", .{});
         var reader = std.Io.Reader.fixed(bytes);
         var mat: [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 = undefined;
         var pixel: [4]u8 = undefined; // in littleendian format rgba
-        var newPixel: [4]u8 = undefined; // in bigendian MSB format abgr
         for (0..LEDSTRIP_ROWS) |row| {
             for (0..LEDSTRIP_COLS) |col| {
                 try reader.readSliceAll(pixel[0..]); // read to buffer is full
-                newPixel[0] = APA102_START;
-                newPixel[1] = pixel[2];
-                newPixel[2] = pixel[1];
-                newPixel[3] = pixel[0];
-                mat[row][col] = newPixel;
+                mat[row][col] = pixel;
             }
         }
         return mat;
@@ -532,7 +541,8 @@ pub fn main(init: std.process.Init) !void {
     const addr = try getLocalAddress(io, allocator);
     std.debug.print("hologlobe IP addr: {s}\n", .{addr});
 
-    // SPI INIT
+    // LEDSTRIP INIT
+    var ledstrip: ws2811.ws2811_t = undefined;
     if (arch != std.Target.Cpu.Arch.x86_64) {
         // GPIO INIT
         const chp = gpiod.gpiod_chip_open("/dev/gpiochip0");
@@ -541,24 +551,56 @@ pub fn main(init: std.process.Init) !void {
             return ControlError.GpioChipFail;
         }
         //defer gpiod.gpiod_chip_close(chp);
-        // SPI INIT
 
-        var spiConfig = spi.SpiConfig{
-            .mode = 0,
-            .bits_per_word = 8,
-            .speed = 18000000,
-            .delay = 0,
+        // ws281x
+        // const ledChip = gpiod.gpiod_chip_open_by_name("gpiochip4");
+        // var ledCtrl = ws281x.WS281x.init(ledChip, LEDSTRIP_PINA);
+        // defer ledCtrl.deinit();
+        // ledCtrl.showColor(0xff, 0xff, 0xa0);
+        // ledCtrl.sendReset();
+
+        // ws2811 init
+        ledstrip = ws2811.ws2811_t{
+            .render_wait_time = 0,
+            .device = null,
+            .rpi_hw = null,
+            .freq = 800000,
+            .dmanum = 10,
+            .channel = .{
+                .{
+                    .gpionum = LEDSTRIP_PIN_A,
+                    .invert = 0,
+                    .count = LEDSTRIP_LENGTH,
+                    .strip_type = ws2811.WS2811_STRIP_GRB,
+                    .leds = null,
+                    .brightness = 50,
+                    .wshift = 0x00,
+                    .rshift = 0x00,
+                    .gshift = 0x00,
+                    .bshift = 0x00,
+                    .gamma = null,
+                },
+                .{
+                    .gpionum = LEDSTRIP_PIN_B,
+                    .invert = 0,
+                    .count = LEDSTRIP_LENGTH,
+                    .strip_type = ws2811.WS2811_STRIP_GRB,
+                    .leds = null,
+                    .brightness = 50,
+                    .wshift = 0x00,
+                    .rshift = 0x00,
+                    .gshift = 0x00,
+                    .bshift = 0x00,
+                    .gamma = null,
+                },
+            },
         };
-
-        spiBus = try spi.Bus.init(allocator, &spiConfig, chp, 25, 24);
-        std.debug.print("spi bus initiated\n", .{});
+        _ = ws2811.ws2811_init(&ledstrip);
 
     }
-
     // we need to hold GPIO and Display allocated until exit
-    defer spiBus.deinit();
 
-    var ledController = try LedControl.init(allocator, io, &spiBus);
+    var ledController = try LedControl.init(allocator, io, &ledstrip);
     try ledController.setInitialImg();
     defer ledController.deinit();
 

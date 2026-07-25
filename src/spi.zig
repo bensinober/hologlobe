@@ -13,17 +13,18 @@ const DisplayError = error{
 };
 
 // START SPIDEV wrapper from C -  no longer used!
+// extern "c" fn spi_open(device: [*c]const u8, config: ?*SpiConfig) c_int;
+// extern "c" fn spi_close(fd: c_int) c_int;
+// extern "c" fn spi_xfer(fd: c_int, txBuf: [*c]u8, len: c_int, rxBuf: [*c]u8, len: c_int) c_int;
+// extern "c" fn spi_send(fd: c_int, txBuf: [*c]const u8, len: c_int) void;
 // const spiDev = spi_open("/dev/spidev0.0", config);
+
 pub const SpiConfig = extern struct {
     mode: u8,
     bits_per_word: u8,
     speed: u32,
     delay: u16,
 };
-extern "c" fn spi_open(device: [*c]const u8, config: ?*SpiConfig) c_int;
-extern "c" fn spi_close(fd: c_int) c_int;
-extern "c" fn spi_xfer(fd: c_int, txBuf: [*c]u8, len: c_int, rxBuf: [*c]u8, len: c_int) c_int;
-extern "c" fn spi_send(fd: c_int, txBuf: [*c]const u8, len: c_int) void;
 
 // SPI message struct
 

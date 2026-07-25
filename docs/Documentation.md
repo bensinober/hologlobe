@@ -1,5 +1,21 @@
 # Documentation
 
+Using rpi_ws2811 library and libgpiod2
+
+Four frame parts connected on top and bottom.
+Top: slip joint and four cables
+Bottom: engine joint
+
+PINOUT: 5V+GND (external power)
+Might be able to use 5v and gnd from pi if suitable power source
+Ledstrip A: GPIO 18, (pin 12)
+Ledstrip B: GPIO 13, (pin 33)
+
+
+## build a zig for aarch64 target
+
+zig build-exe src/ws2812b-spi.zig -target aarch64-linux-gnu -femit-bin=ws2812b-test-aarch64
+
 ## build gpiod.zig module from c test
 
     g++ -Wall -Wextra -Werror test.c -lgpiod
