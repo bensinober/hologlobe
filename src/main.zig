@@ -59,6 +59,9 @@ var spiBus: spi.Bus = undefined;
 var ledMode = LEDMode.IDLE;
 var lastLedMode = LEDMode.IDLE;
 
+// CLI --delay=<ms> (decimals allowed, e.g. 0.5): dark hold between animation frames (0 = free-run)
+var anim_delay_us: i64 = 0;
+
 pub const Server = struct {
     allocator: Allocator,
     io: std.Io,
@@ -168,6 +171,36 @@ pub const Server = struct {
             // };
             // self.ledController.imgMatrix = &imgMatrix;
             try req.respond("OK", .{});
+        } else if (req.head.method == .PUT and std.mem.startsWith(u8, req.head.target, "/setGain")) {
+            // /setGain/{r}/{g}/{b}, each 0..255 - live white-balance tuning
+            var paths = std.mem.splitScalar(u8, req.head.target, '/');
+            var i: usize = 0;
+            var gain: [3]u16 = .{ 0, 0, 0 };
+            var ok = true;
+            while (paths.next()) |p| {
+                if (i >= 2 and i <= 4) {
+                    gain[i - 2] = std.fmt.parseInt(u16, p, 10) catch {
+                        ok = false;
+                        break;
+                    };
+                    if (gain[i - 2] > 255) {
+                        ok = false;
+                        break;
+                    }
+                } else if (i > 4) {
+                    ok = false;
+                    break;
+                }
+                i += 1;
+            }
+            if (ok) {
+                self.ledController.setGain(gain) catch |err| {
+                    std.debug.print("Error setting gain: {}\n", .{err});
+                };
+                try req.respond("OK", .{ .transfer_encoding = .chunked });
+            } else {
+                try req.respond("Bad gain: /setGain/{r}/{g}/{b}", .{ .status = .bad_request, .transfer_encoding = .chunked });
+            }
         } else {
             try req.respond("Not Found", .{ .status = .not_found });
         }
@@ -195,9 +228,58 @@ pub const Server = struct {
 
 };
 
-const ImageMat = struct {
+pub const ImageMat = struct {
     mat: [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8,
 };
+
+// --- LED colour correction -------------------------------------------------
+// Image pixels are sRGB-encoded (gamma ~2.2), but the WS2812 emits light that
+// is roughly linear in the 8-bit drive value. To make the globe emit the same
+// light as an sRGB monitor, each channel is driven with 255*(v/255)^(1/2.2)
+// instead of v. Without this, colours whose channels differ (orange, brown,
+// pink, ...) come out with a shifted hue, while full-on colours look fine.
+//
+// The three WS2812 phosphors are also not equally bright per drive level
+// (green and blue are typically stronger than red, which varies a lot by
+// batch), so a plain white looks greenish, orange/brown drift towards yellow
+// and dark reds drift towards pink. ledGain white-balances the strip:
+// the ratios between the values set the colour balance, their absolute
+// level sets the overall brightness. Tune live with
+// PUT /setGain/{r}/{g}/{b} while the globe spins, until solid colours match
+// the screen; to change brightness without shifting the hue, scale all
+// three values by the same factor.
+const LED_GAMMA: f32 = 2.2;
+// Tuned on this strip: green/blue dies are ~1.3-1.5x stronger than red
+var ledGain: [3]u16 = .{ 30, 20, 25 }; // r, g, b
+
+// Filled at startup and on every gain change (std.math.pow is too slow at comptime)
+var ledLUT: [3][256]u8 = undefined;
+
+fn initLedLUT() void {
+    for (0..256) |vi| {
+        const v = @as(u8, @intCast(vi));
+        const lin = std.math.pow(f32, @as(f32, v) / 255.0, @as(f32, 1.0) / LED_GAMMA);
+        for (0..3) |c| {
+            // lin is 0..1; gain <= 255 keeps scaled in 0..255
+            const scaled: f32 = lin * @as(f32, ledGain[c]);
+            ledLUT[c][v] = @intFromFloat(@min(255.0, scaled + 0.5));
+        }
+    }
+}
+
+// Map raw sRGB pixels through the correction LUT (once per load / gain change)
+fn correctMat(mat: [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8) [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 {
+    var out: [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 = undefined;
+    for (0..LEDSTRIP_ROWS) |row| {
+        for (0..LEDSTRIP_COLS) |col| {
+            out[row][col][0] = ledLUT[0][mat[row][col][0]]; // r
+            out[row][col][1] = ledLUT[1][mat[row][col][1]]; // g
+            out[row][col][2] = ledLUT[2][mat[row][col][2]]; // b
+            out[row][col][3] = mat[row][col][3]; // a
+        }
+    }
+    return out;
+}
 
 pub const LedControl = struct {
     const Self = @This();
@@ -206,6 +288,9 @@ pub const LedControl = struct {
     io: std.Io,
     calibrationMatrix: ImageMat,
     imgMatrix: ImageMat,
+    // raw pixels, kept so a gain change can re-correct without a re-upload
+    calibrationOrig: ImageMat,
+    imgOrig: ImageMat,
     frameBuf: [2][LEDSTRIP_LENGTH][4]u8, // channel 0 + 1
     allocator: Allocator,
     mutex: std.Io.Mutex,
@@ -217,6 +302,8 @@ pub const LedControl = struct {
             .io = io,
             .calibrationMatrix = undefined,
             .imgMatrix = undefined,
+            .calibrationOrig = undefined,
+            .imgOrig = undefined,
             .frameBuf = frameBuf,
             .allocator = allocator,
             .mutex = std.Io.Mutex.init,
@@ -235,8 +322,8 @@ pub const LedControl = struct {
         try self.mutex.lock(self.io);
         defer self.mutex.unlock(self.io);
         const mat = try imgbytes2matrix(&img.DATA);
-        const imageMat: ImageMat = .{ .mat = mat };
-        self.calibrationMatrix = imageMat;
+        self.calibrationOrig = ImageMat{ .mat = mat };
+        self.calibrationMatrix = ImageMat{ .mat = correctMat(mat) };
     }
 
     pub fn setImg(self: *Self, imageBytes: []u8) !void {
@@ -245,9 +332,21 @@ pub const LedControl = struct {
         //const copy = try self.allocator.alloc(u8, imageBytes.len);
         //@memcpy(copy[0..], imageBytes);
         const mat = try imgbytes2matrix(imageBytes);
-        const imageMat: ImageMat = .{ .mat = mat };
-        self.imgMatrix = imageMat;
+        self.imgOrig = ImageMat{ .mat = mat };
+        self.imgMatrix = ImageMat{ .mat = correctMat(mat) };
         //std.debug.print("mat: {any}\n", .{mat});
+    }
+
+    // Update the white-balance gains and re-correct the loaded images in place
+    pub fn setGain(self: *Self, gain: [3]u16) !void {
+        try self.mutex.lock(self.io);
+        defer self.mutex.unlock(self.io);
+        for (0..3) |c| {
+            ledGain[c] = gain[c];
+        }
+        initLedLUT();
+        self.imgMatrix = ImageMat{ .mat = correctMat(self.imgOrig.mat) };
+        self.calibrationMatrix = ImageMat{ .mat = correctMat(self.calibrationOrig.mat) };
     }
 
     // rgba -> grba
@@ -307,7 +406,6 @@ pub const LedControl = struct {
     pub fn renderImg(self: *Self) !void {
         const start = std.Io.Clock.now(.awake, self.io);
         const quarter = LEDSTRIP_ROWS / 4; // 25 rotation frames, 25 rows per band
-        const frame_ns: i96 = 8_000_000; // 350 rpm: 170 ms rotation / 25 frames
         for (0..quarter) |n| {
             {
                 try self.mutex.lock(self.io);
@@ -329,13 +427,17 @@ pub const LedControl = struct {
                     try self.showLocked(); // one ws2811 render per rotation frame
                 }
             }
-            // sleep until the next absolute frame deadline: no accumulated drift
-            const elapsed = start.untilNow(self.io, .awake).toNanoseconds();
-            const deadline = frame_ns * (n + 1);
-            if (elapsed < deadline) {
-                try self.io.sleep(std.Io.Duration.fromNanoseconds(deadline - elapsed), .real);
+            // CLI --delay=<ms>: blank the strip, then hold it dark.
+            // Short exposure per frame = far less angular smear.
+            if (@import("builtin").target.cpu.arch != std.Target.Cpu.Arch.x86_64 and anim_delay_us > 0) {
+                {
+                    try self.mutex.lock(self.io);
+                    defer self.mutex.unlock(self.io);
+                    @memset(std.mem.sliceAsBytes(&self.frameBuf), 0);
+                    try self.showLocked(); // send black frame
+                }
+                try self.io.sleep(std.Io.Duration.fromMicroseconds(anim_delay_us), .real);
             }
-
         }
         //try std.Io.sleep(self.io, std.Io.Duration.fromMilliseconds(300), .awake); // sleep 350us to balance frame rate of 5Hz
 
@@ -528,7 +630,7 @@ pub const LedControl = struct {
     pub fn imgbytes2matrix(bytes: []const u8) ![LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 {
         var reader = std.Io.Reader.fixed(bytes);
         var mat: [LEDSTRIP_ROWS][LEDSTRIP_COLS][4]u8 = undefined;
-        var pixel: [4]u8 = undefined; // in littleendian format rgba
+        var pixel: [4]u8 = undefined; // rgba
         for (0..LEDSTRIP_ROWS) |row| {
             for (0..LEDSTRIP_COLS) |col| {
                 try reader.readSliceAll(pixel[0..]); // read to buffer is full
@@ -560,6 +662,13 @@ pub fn main(init: std.process.Init) !void {
 
     for (args) |arg| {
         std.log.info("Argument: {s}", .{arg});
+        if (std.mem.startsWith(u8, arg, "--delay=")) {
+            const ms = std.fmt.parseFloat(f64, arg["--delay=".len..]) catch {
+                std.debug.print("bad --delay arg '{s}', keeping {d} us\n", .{ arg, anim_delay_us });
+                continue;
+            };
+            anim_delay_us = if (ms > 0) @intFromFloat(ms * std.time.us_per_ms) else 0;
+        }
     }
     const arch = @import("builtin").target.cpu.arch;
     // Prints to stderr, shortcut based on `std.io.getStdErr()`
@@ -627,6 +736,7 @@ pub fn main(init: std.process.Init) !void {
     }
     // we need to hold GPIO and Display allocated until exit
 
+    initLedLUT();
     var ledController = try LedControl.init(allocator, io, &ledstrip);
     try ledController.setInitialImg();
     defer ledController.deinit();
